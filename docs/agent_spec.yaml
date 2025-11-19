@@ -1,0 +1,347 @@
+openapi: 3.0.3
+info:
+  name: Knowledge Domains Agent
+  version: 0.0.2
+  description: >
+    An agent for managing user knowledge domains. 
+    Handles CRUD operations, status management, and content retrieval (brief and full).
+    Implements logic for 'kb_domains_agent'.
+
+paths:
+  /getDomainsList/{ownerId}:
+    get:
+      summary: Get the list of user's knowledge domains
+      description: >
+        Returns domains for a specific user. 
+        Can be filtered to show only active or inactive domains.
+      parameters:
+        - name: ownerId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          description: Filter domains by their activity status.
+          required: false
+          schema:
+            type: string
+            enum:
+              - active
+              - inactive
+              - all
+            default: all
+      responses:
+        '200':
+          description: List of domains retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DomainListItem'
+        '404':
+          description: User not found
+        '500':
+          description: Internal server error
+
+  /getDomainConfig/{domainId}:
+    get:
+      summary: Get the detailed configuration of a knowledge domain
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Domain configuration retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainConfig'
+        '404':
+          description: Knowledge domain not found
+        '500':
+          description: Internal server error
+
+  /createDomain:
+    post:
+      summary: Create a new knowledge domain
+      description: >
+        Creates a domain with the prettified description and keywords confirmed by the user.
+        Triggers asynchronous vectorization process.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDomainRequest'
+      responses:
+        '201':
+          description: Domain created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainConfig'
+        '400':
+          description: Invalid input (missing ownerId or name)
+        '500':
+          description: Internal server error
+
+  /updateDomain/{domainId}:
+    put:
+      summary: Update an existing knowledge domain
+      description: Updates name, description, or keywords. Triggers re-vectorization.
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDomainRequest'
+      responses:
+        '200':
+          description: Domain updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainConfig'
+        '404':
+          description: Domain not found
+        '500':
+          description: Internal server error
+
+  /setDomainStatus/{domainId}:
+    patch:
+      summary: Activate or Deactivate a knowledge domain
+      description: Allows soft-deleting (deactivating) or restoring (activating) a domain.
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - isActive
+              properties:
+                isActive:
+                  type: boolean
+                  description: True to activate, False to deactivate.
+      responses:
+        '200':
+          description: Domain status updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainConfig'
+        '404':
+          description: Domain not found
+        '500':
+          description: Internal server error
+
+  /prettifyDomainDescription:
+    post:
+      summary: Generate enhanced description and keywords
+      description: >
+        Uses LLM to expand the user's raw input (Name + PoV) into a full description and keyword list.
+        Idempotent: can be called multiple times before creation/update.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PrettifyRequest'
+      responses:
+        '200':
+          description: Content generated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrettifyResponse'
+        '500':
+          description: Internal server error
+
+  /getDomainBriefContent/{domainId}:
+    get:
+      summary: Get brief analytical summary of the domain
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Brief content retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DomainBriefContent'
+        '404':
+          description: Domain not found
+        '500':
+          description: Internal server error
+
+  /getDomainFullContent/{domainId}:
+    get:
+      summary: Get raw export of the domain content
+      description: Returns a Markdown file containing all fragments and metadata.
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Markdown file generated
+          content:
+            text/markdown:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: Domain not found
+        '500':
+          description: Internal server error
+
+components:
+  schemas:
+    # Used for the list view (lightweight)
+    DomainListItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        isActive:
+          type: boolean
+      required:
+        - id
+        - name
+        - isActive
+
+    # Full Configuration Object
+    DomainConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        ownerId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+          description: The detailed Point of View or expanded description.
+        keywords:
+          type: string
+          description: List of keywords/phrases (free-form string) for vector matching.
+        isActive:
+          type: boolean
+      required:
+        - id
+        - ownerId
+        - name
+        - isActive
+
+    # Request DTO for Creation
+    CreateDomainRequest:
+      type: object
+      properties:
+        ownerId:
+          type: string
+          format: uuid
+          description: The user this domain belongs to.
+        name:
+          type: string
+        description:
+          type: string
+        keywords:
+          type: string
+      required:
+        - ownerId
+        - name
+
+    # Request DTO for Update
+    UpdateDomainRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        keywords:
+          type: string
+      # At least one field should be present, but schema validation usually handles structure.
+
+    # Request DTO for Prettify
+    PrettifyRequest:
+      type: object
+      properties:
+        rawName:
+          type: string
+        rawDescription:
+          type: string
+          description: User's initial Point of View.
+        rawKeywords:
+          type: string
+      required:
+        - rawName
+
+    # Response DTO for Prettify
+    PrettifyResponse:
+      type: object
+      properties:
+        prettifiedName:
+          type: string
+        prettifiedDescription:
+          type: string
+        prettifiedKeywords:
+          type: string
+
+    # Analytics Object
+    DomainBriefContent:
+      type: object
+      properties:
+        numberOfChunks:
+          type: integer
+          minimum: 0
+          description: Count of relevant fragments found.
+        numberOfSources:
+          type: integer
+          minimum: 0
+          description: Count of unique documents.
+        totalBytes:
+          type: integer
+          minimum: 0
+          description: "Total size (in bytes, UTF-8 text) of all fragments, used as a rough measure of content volume."
+        domainSuperSummary:
+          type: string
+          description: "High-level insight generated by LLM (1–3 key ideas)."
+        domainSummary:
+          type: string
+          description: "General summary of accumulated content for this domain."
