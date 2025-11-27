@@ -1,0 +1,585 @@
+=== ОГЛАВЛЕНИЕ / TABLE OF CONTENTS ===
+
+agent_root.json
+subagent_document_processor.json
+subagent_domain_lifecycle.json
+tool_auth_user.json
+tool_define_topic_relevance.json
+tool_export_detailed_domain_snapshot.json
+tool_extract_facts_from_text.json
+tool_fetch_user_knowledge_domains.json
+tool_generate_domain_snapshot.json
+tool_prettify_domain_description.json
+tool_process_ordinary_page.json
+tool_process_pdf_link.json
+tool_process_youtube_link.json
+tool_toggle_domain_status.json
+
+--------------------------------------------------------------------------------
+
+FILE: agent_root.json
+
+{
+  "agent_id": "agent_root",
+  "model_config": {
+    "temperature": 0.0,
+    "model_id": "gemini-pro-1.5"
+  },
+  "system_instruction": "### ROLE & OBJECTIVE\nYou are the **Knowledge System Orchestrator**. Your primary goal is to manage the user session, authenticate identity, visualize the user's knowledge graph (Domains), and accurately route requests to specialized sub-agents or internal tools.\n\n### CONTEXT\nYou are the entry point of the Google ADK system. You interact with:\n1.  **Users:** Who may be unauthenticated or authenticated.\n2.  **Storage/Auth Tools:** `tool_auth_user`, `tool_fetch_user_knowledge_domains`, `tool_toggle_domain_status`, `tool_generate_domain_snapshot`, `tool_export_detailed_domain_snapshot`.\n3.  **Specialized Sub-Agents:**\n    * `subagent_domain_lifecycle`: For creating or editing domain definitions.\n    * `subagent_document_processor`: For ingesting content via URLs.\n\n### WORKFLOW (CHAIN OF THOUGHT)\n\n#### PHASE 1: AUTHENTICATION & STATE CHECK\n1.  **Check Identity:** Look for `session_user_id` in the input.\n    * **IF MISSING:** \n        * Analyze `user_message`. If it appears to be a name (and not a command), call `tool_auth_user(username)`.\n        * If successful, set `session_user_id`. Retrieve domains using `tool_fetch_user_knowledge_domains`. \n        * Return `status: SUCCESS` with a greeting and the domain list (separated by Active/Inactive).\n        * If `user_message` is not a name, ask the user to introduce themselves.\n    * **IF PRESENT:** Proceed to PHASE 2.\n\n#### PHASE 2: INTENT CLASSIFICATION & ROUTING\n1.  **Analyze Input:** Examine `user_message` to determine the user's intent.\n\n    * **CASE A: Content Ingestion (URL Detected)**\n        * *Check:* Does the text contain a valid URL (`http://` or `https://`)?\n        * *Action:* Delegate to `subagent_document_processor`.\n        * *Payload:* `{ \"raw_text\": user_message }`.\n\n    * **CASE B: Domain Lifecycle (Create/Edit)**\n        * *Check:* Keywords like \"create domain\", \"new topic\", \"edit domain\", \"change description\".\n        * *Action:* Delegate to `subagent_domain_lifecycle`.\n        * *Payload:* Determine `operation_type` (CREATE or UPDATE). Pass `user_id` and raw `user_input`.\n\n    * **CASE C: Domain Status Toggle**\n        * *Check:* Keywords like \"enable\", \"disable\", \"activate\", \"turn off\".\n        * *Action:* Identify the domain name. Call `tool_toggle_domain_status(domain_id, target_status)`.\n        * *Output:* Confirm result to user.\n\n    * **CASE D: Quick Snapshot**\n        * *Check:* Keywords like \"snapshot\", \"summary\", \"what do I know about X\".\n        * *Action:* Call `tool_generate_domain_snapshot(domain_id)`.\n        * *Output:* Display the text snapshot directly.\n\n    * **CASE E: Detailed Export**\n        * *Check:* Keywords like \"export\", \"download\", \"detailed report\".\n        * *Action:* Call `tool_export_detailed_domain_snapshot(domain_id)`.\n        * *Output:* Provide the download link and file size returned by the tool.\n\n#### PHASE 3: ERROR HANDLING\n1.  If a tool returns an error, catch it gracefully.\n2.  Translate technical error codes into user-friendly messages (e.g., \"I couldn't find a domain with that name\" instead of \"ID_NOT_FOUND\").\n\n### CONSTRAINTS\n1.  **Safety:** Do not route to sub-agents if the user is not authenticated (no `session_user_id`).\n2.  **Accuracy:** When delegating to `subagent_domain_lifecycle`, you must make a best-guess effort to distinguish between `CREATE` and `UPDATE` based on the verb used.\n3.  **Formatting:** When listing domains, explicitly group them into \"🟢 Active\" and \"⚪ Inactive\" lists.\n4.  **Handoff:** When delegating, set `status` to `DELEGATE` and populate `delegation_target`.",
+  "interfaces": {
+    "input": {
+      "type": "object",
+      "properties": {
+        "user_message": {
+          "type": "string",
+          "description": "The latest text input from the user."
+        },
+        "session_user_id": {
+          "type": "string",
+          "description": "The authenticated User ID. Null if not yet logged in.",
+          "nullable": true
+        }
+      },
+      "required": [
+        "user_message"
+      ]
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "reasoning",
+        "status"
+      ],
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "description": "Chain of thought explaining the classification and routing logic."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "SUCCESS",
+            "AUTH_REQUIRED",
+            "DELEGATE",
+            "ERROR"
+          ],
+          "description": "Current processing state."
+        },
+        "response_message": {
+          "type": "string",
+          "description": "Text response to show the user (for greetings, tool results, or errors)."
+        },
+        "delegation_target": {
+          "type": "string",
+          "enum": [
+            "subagent_domain_lifecycle",
+            "subagent_document_processor"
+          ],
+          "description": "ID of the sub-agent to invoke, if status is DELEGATE."
+        },
+        "delegation_payload": {
+          "type": "object",
+          "description": "The exact JSON payload to pass to the sub-agent's input interface."
+        },
+        "authenticated_user_id": {
+          "type": "string",
+          "description": "Returns the ID if authentication happened during this turn."
+        }
+      }
+    }
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: subagent_document_processor.json
+
+{
+  "agent_id": "subagent_document_processor",
+  "model_config": {
+    "temperature": 0.0,
+    "model_id": "gemini-pro-1.5",
+    "top_k": 40,
+    "top_p": 0.95
+  },
+  "system_instruction": "### ROLE & OBJECTIVE\nYou are the **Knowledge Acquisition & Archival Specialist**. Your goal is to process unstructured text containing URLs, extract relevant facts based on user interests, and securely persist confirmed knowledge into the Memory Bank.\n\n### CONTEXT\nYou operate within a Google ADK environment connected to:\n1.  **User Knowledge Tool:** `tool_fetch_user_knowledge_domains` to retrieve the user's active zones of interest (ontology).\n2.  **Memory Bank (Vertex AI):** Long-term storage for confirmed facts.\n3.  **Content Tools:** Specialized tools for fetching PDF, YouTube, or Web content.\n\n### WORKFLOW (CHAIN OF THOUGHT)\n\n#### PHASE 1: INPUT ANALYSIS\n1.  Analyze the input JSON.\n    * **IF** input contains `selected_fact_ids` and `facts_payload`: Jump to **PHASE 4 (PERSISTENCE)**.\n    * **IF** input contains `raw_text`: Proceed to **PHASE 2 (EXTRACTION)**.\n\n#### PHASE 2: CONTENT EXTRACTION (Discovery Mode)\n1.  **URL Extraction:** Identify the first URL in the already validated `raw_text`.\n2.  **Classification (Provisional/Flexible):**\n    * Analyze the URL string to estimate the content type. \n    * *NOTE: The strict classification algorithm is currently under development.* \n    * Apply flexible heuristics:\n        * **PDF:** Looks for file extensions or PDF-viewer headers.\n        * **YouTube:** Distinguish between actual video watch links (e.g., `watch?v=`) and non-video pages (e.g., `/channel/`, `/playlist?list=`). Only classify as YouTube if it points to a specific transcribable video.\n        * **Ordinary Page:** Default category for everything else or ambiguous cases.\n3.  **Fetch Content:** Call the appropriate tool based on the flexible classification above:\n    * `tool_process_pdf_link(url)`\n    * `tool_process_youtube_link(url)`\n    * `tool_process_ordinary_page(url)`\n4.  **Domain Retrieval:** \n    * Call `tool_fetch_user_knowledge_domains` using the `user_id` from the input.\n    * **Parameters:** Set `status_filter='ACTIVE'` and `view_mode='DETAILED'` (to get descriptions and keywords needed for relevance analysis).\n    * If the tool returns empty data or error, terminate with appropriate status.\n\n#### PHASE 3: RELEVANCE & FACT MINING\n1.  **Relevance Loop:** For each domain returned by `tool_fetch_user_knowledge_domains`:\n    * Call `tool_define_topic_relevance` (inputs: content_text, domain_meta).\n    * Check if `relevance_score` > `threshold`.\n    * Discard domains below threshold.\n2.  **Fact Extraction:** For each *relevant* domain:\n    * Call `tool_extract_facts_from_text` (inputs: content_text, domain_scope, relevance_reasoning).\n    * Generate a unique, short `fact_id` for every extracted fact.\n3.  **Presentation:** Structure the output strictly for User Review. Do NOT save yet.\n    * Return `status: \"review_required\"` along with the list of candidate facts grouped by domain.\n\n#### PHASE 4: PERSISTENCE (Save Mode)\n1.  **Validation:** Receive list of `selected_fact_ids` from user input.\n2.  **Commit:** For each selected fact:\n    * Call `VertexAiMemoryBankService` (or equivalent tool exposed as `tool_save_memory_fact`).\n3.  **Error Handling:**\n    * If `tool_fetch_user_knowledge_domains` fails: Return error `DOMAIN_ACCESS_ERROR`.\n    * If `MemoryBank` fails: Return error `MEMORY_WRITE_ERROR`.\n4.  **Finalize:** Return success message summarizing count of saved facts.\n\n### CONSTRAINTS\n1.  **Atomic Operations:** Do not hallucinate content content that was not returned by the fetch tools.\n2.  **Privacy:** Only process the *first* URL found.\n3.  **Safety:** If the URL classification is ambiguous, default to `tool_process_ordinary_page` rather than failing.\n4.  **Formatting:** Ensure all `fact_id` strings are human-readable but unique.",
+  "interfaces": {
+    "input": {
+      "type": "object",
+      "required": [
+        "user_id"
+      ],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "description": "The unique identifier of the user. REQUIRED to fetch user-specific domains."
+        },
+        "raw_text": {
+          "type": "string",
+          "description": "Initial text from ROOT_AGENT containing a URL."
+        },
+        "selected_fact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "List of IDs the user chose to save (provided in the second turn)."
+        },
+        "facts_payload": {
+          "type": "array",
+          "description": "The full fact objects generated in the previous turn (needed to save them).",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "output": {
+      "type": "object",
+      "required": [
+        "reasoning",
+        "status"
+      ],
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "description": "Chain of thought explanation, including how the URL was classified."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "review_required",
+            "success",
+            "error",
+            "no_relevance"
+          ]
+        },
+        "candidate_facts": {
+          "type": "array",
+          "description": "List of extracted facts for user review (if status is review_required).",
+          "items": {
+            "type": "object",
+            "properties": {
+              "domain": {
+                "type": "string"
+              },
+              "fact_id": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "saved_count": {
+          "type": "integer",
+          "description": "Number of facts successfully saved to Memory Bank."
+        },
+        "error_detail": {
+          "type": "string",
+          "description": "Technical details if an error occurred."
+        }
+      }
+    }
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: subagent_domain_lifecycle.json
+
+{
+  "agent_id": "subagent_domain_lifecycle",
+  "model_config": {
+    "temperature": 0.0,
+    "model_id": "gemini-pro-1.5"
+  },
+  "system_instruction": "### ROLE & OBJECTIVE\nYou are the **Domain Lifecycle Manager**. Your sole definition of success is the accurate creation or modification of a 'Domain' (a user interest zone used for document classification) in the Persistent Storage STORAGE_DOMAINS (Firestore). You ensure all domains have a standardized Name, Description, and Keywords list that the user has explicitly approved.\n\n### CONTEXT\nYou operate within a knowledge management architecture where users define 'Domains' (e.g., 'AI Technologies', 'Renewable Energy') to filter and process large volumes of documents. Data integrity is paramount; you act as the gatekeeper between raw user intent and the database. You have access to a `tool_prettify_domain_description` (to structure raw text) and `firestore_connector` (for persistence).\n\n### WORKFLOW (CHAIN OF THOUGHT)\n1.  **Input Analysis:** Identify the `operation_type` (CREATE or UPDATE). Verify `user_id` presence.\n2.  **State Hydration (UPDATE only):** \n    * If `operation_type` is UPDATE, attempt to fetch the existing domain from Firestore using `domain_id`.\n    * *Error Handler:* If the read fails or ID is invalid, terminate with a specific READ_ERROR.\n    * Present current state (Name, Desc, Keywords) to the context.\n3.  **Drafting/Refining:**\n    * Ingest the `user_input` (natural language description).\n    * Call the `tool_prettify_domain_description` to decompose this input into: `name` (string), `description` (string), `keywords` (array).\n4.  **Verification Logic:**\n    * Compare the generated draft against the user's request.\n    * *Critical Check:* Has the user explicitly confirmed this draft? (Look for `confirmation_status` in input).\n    * If NOT confirmed: Return the structured draft to the user for review.\n    * If CONFIRMED: Proceed to Persistence.\n5.  **Persistence:**\n    * Call `firestore_connector` to write/update the record.\n    * For CREATE: Generate new ID, write data.\n    * For UPDATE: Overwrite data at existing ID.\n    * *Error Handler:* If write fails, terminate with WRITE_ERROR.\n6.  **Final Output:** Return the written object and success status.\n\n### CONSTRAINTS\n* **Data Validation:** Never save a domain with an empty name or empty keywords list.\n* **User Sovereignty:** You must NEVER commit data to Firestore without the user's implicit or explicit agreement on the generated fields.\n* **Error Handling:** Distinguish clearly between 'I didn't understand the text' (Logic Error) and 'Database is down' (System Error).\n* **Formatting:** Do not output markdown or conversational filler in the `result` field; keep it strict JSON.",
+  "interfaces": {
+    "input": {
+      "type": "object",
+      "properties": {
+        "operation_type": {
+          "type": "string",
+          "enum": [
+            "CREATE",
+            "UPDATE"
+          ],
+          "description": "The intent of the workflow."
+        },
+        "user_id": {
+          "type": "string",
+          "description": "Unique identifier of the domain owner."
+        },
+        "domain_id": {
+          "type": "string",
+          "description": "Required only for UPDATE operations."
+        },
+        "user_input": {
+          "type": "string",
+          "description": "The natural language description or modification request from the user."
+        },
+        "confirmation_status": {
+          "type": "boolean",
+          "description": "True if the user has reviewed and accepted the current draft.",
+          "default": false
+        }
+      },
+      "required": [
+        "operation_type",
+        "user_id",
+        "user_input"
+      ]
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "reasoning": {
+          "type": "string",
+          "description": "Chain of thought explaining the agent's internal logic and state transitions."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "SUCCESS",
+            "AWAITING_USER_REVIEW",
+            "READ_ERROR",
+            "WRITE_ERROR"
+          ]
+        },
+        "domain_draft": {
+          "type": "object",
+          "description": "The structured domain data proposed by the agent or saved to DB.",
+          "properties": {
+            "domain_id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "keywords": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "message_to_user": {
+          "type": "string",
+          "description": "A polite message asking for confirmation or confirming success."
+        }
+      },
+      "required": [
+        "reasoning",
+        "status"
+      ]
+    }
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_auth_user.json
+
+{
+  "name": "tool_auth_user",
+  "description": "SUMMARY: Resolves user identity against Google Firestore by retrieving an existing ID or creating a new record if the user is missing.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Receives `username` from AGENT_ROOT.\n2. Connects to Google Firestore.\n3. Queries for an existing user document matching the provided name.\n4. If found: Returns the existing `user_id` and sets `is_new_user` to false.\n5. If not found: Creates a new document in Firestore, generates a new `user_id`, and sets `is_new_user` to true.\n6. Returns the result wrapped in a standard success object.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object structured as follows:\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"user_id\": \"string (The unique Firestore ID)\",\n    \"is_new_user\": boolean (true if created now, false if retrieved)\n  }\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"FIRESTORE_CONNECTION_ERROR\": Unable to reach Google Firestore. Retry the operation.\n- \"USER_CREATION_FAILED\": Failed to write the new user record (e.g., permissions or storage limits).\n- \"QUERY_FAILED\": Error executing the lookup query.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "username": {
+        "type": "string",
+        "description": "The unique name of the user to authenticate or register. Do not guess; use the exact name provided by the context or AGENT_ROOT."
+      }
+    },
+    "required": [
+      "username"
+    ]
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_define_topic_relevance.json
+
+{
+  "name": "tool_define_topic_relevance",
+  "description": "SUMMARY: Evaluates the semantic relevance of extracted text to a specific user Knowledge Domain using an internal LLM assessment.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Constructs a prompt containing the Domain metadata (name, description, keywords) and the target content text.\n2. Sends this payload to the classification LLM to analyze semantic alignment.\n3. Parses the model's output to extract a normalized floating-point score (0.0 to 1.0).\n4. Returns the score indicating the degree of relevance.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"relevance_score\": float (0.0-1.0), \"reasoning\": \"string (short explanation of the score)\", \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"LLM_SERVICE_ERROR\": The underlying model failed to generate a response or timed out.\n- \"CONTEXT_LIMIT_EXCEEDED\": The input text is too long for the analyzer's context window.\n- \"MALFORMED_OUTPUT\": The analyzer failed to return a parsable score.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "content_text": {
+        "type": "string",
+        "description": "The raw text extracted from the source (PDF, YouTube, or Web) to be analyzed."
+      },
+      "domain_name": {
+        "type": "string",
+        "description": "The unique name of the knowledge domain (e.g., 'Artificial Intelligence')."
+      },
+      "domain_description": {
+        "type": "string",
+        "description": "A detailed description of the user's area of interest to guide the semantic matching."
+      },
+      "domain_keywords": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of specific keywords or tags associated with the domain."
+      }
+    },
+    "required": [
+      "content_text",
+      "domain_name",
+      "domain_description",
+      "domain_keywords"
+    ]
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_export_detailed_domain_snapshot.json
+
+{
+  "name": "export_detailed_domain_snapshot",
+  "description": "SUMMARY: Generates a comprehensive Markdown report containing all metadata and facts for a specific domain, uploads it to S3, and returns a download link.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates `user_id` and `domain_id`.\n2. Queries STORAGE_DOMAINS (Firestore) to retrieve domain metadata: Name, Description, and Keywords.\n3. Connects to the Memory Bank (Google ADK / VertexAiMemoryBankService) to fetch all recorded facts and associated metadata for this domain.\n4. Checks if facts exist. If the list is empty, returns status indicating no data to export.\n5. Compiles retrieved data into a formatted Markdown file.\n6. Uploads the file to the S3 storage bucket.\n7. Returns the download URL and file size.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON wrapper:\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"domain_id\": \"string\",\n    \"download_url\": \"string (URI)\",\n    \"file_size_bytes\": integer,\n    \"file_format\": \"markdown\"\n  }\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"DOMAIN_NOT_FOUND\": The specified domain ID does not exist in STORAGE_DOMAINS.\n- \"NO_FACTS_FOUND\": The domain exists, but the Memory Bank contains no facts to export.\n- \"STORAGE_DOMAINS_UNAVAILABLE\": Firestore is unreachable.\n- \"MEMORY_BANK_UNAVAILABLE\": VertexAiMemoryBankService failed to return facts.\n- \"S3_UPLOAD_FAILED\": The system failed to upload the generated report to object storage.\n- \"INTERNAL_ERROR\": Error during Markdown compilation.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "The unique identifier of the user (must match the ID used in `fetch_user_knowledge_domains`)."
+      },
+      "domain_id": {
+        "type": "string",
+        "description": "The specific ID of the knowledge domain to export."
+      }
+    },
+    "required": [
+      "user_id",
+      "domain_id"
+    ],
+    "additionalProperties": false
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_extract_facts_from_text.json
+
+{
+  "name": "tool_extract_facts_from_text",
+  "description": "SUMMARY: Mines the provided text for atomic, verifiable facts that specifically pertain to the defined Knowledge Domain, generating human-readable IDs for each.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Analyzes the `content_text` within the context of the `domain_description`, `domain_keywords` and previous `relevance_justification`.\n2. Uses an LLM to identify distinct factual statements (not opinions or generalities).\n3. Generates a unique, human-readable slug (ID) for each fact (e.g., 'ai_trends_2024_01') to facilitate user reference.\n4. Returns a structured list of these facts with individual justifications.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"facts\": [ { \"fact_id\": \"string\", \"content\": \"string\", \"justification\": \"string\" } ], \"extracted_count\": integer, \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"LLM_GENERATION_FAILED\": The model failed to process the extraction request.\n- \"NO_FACTS_FOUND\": The text was deemed relevant overall, but contained no specific atomic facts suitable for the memory bank.\n- \"CONTEXT_LIMIT_EXCEEDED\": Input text length exceeded the model's processing window.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "content_text": {
+        "type": "string",
+        "description": "The full text extracted from the source to be mined for facts."
+      },
+      "domain_name": {
+        "type": "string",
+        "description": "The name of the target Knowledge Domain."
+      },
+      "domain_description": {
+        "type": "string",
+        "description": "The definition of the domain to ensure extracted facts are strictly relevant."
+      },
+      "domain_keywords": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "Keywords assisting the LLM in focusing attention on specific terminology."
+      },
+      "relevance_justification": {
+        "type": "string",
+        "description": "The explanation from the previous step (tool_define_topic_relevance) on why this text is relevant."
+      }
+    },
+    "required": [
+      "content_text",
+      "domain_name",
+      "domain_description",
+      "domain_keywords",
+      "relevance_justification"
+    ]
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_fetch_user_knowledge_domains.json
+
+{
+  "name": "fetch_user_knowledge_domains",
+  "description": "SUMMARY: Retrieves a list of knowledge domains (interests) for a specific user from Google Firestore, with options to filter by status and toggle between brief or detailed views.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates the incoming `user_id`.\n2. Connects to the Google Firestore persistence layer.\n3. Queries the user's domain collection. If `status_filter` is provided (ACTIVE or INACTIVE), applies this filter.\n4. If the list is empty, returns a structured response indicating no domains exist.\n5. Maps the results based on `view_mode`:\n   - If 'BRIEF': Returns only ID, Name, and Status.\n   - If 'DETAILED': Additionally includes `domain_description` and `domain_keywords`.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON wrapper:\n{\n  \"status\": \"success\" | \"empty\",\n  \"data\": [\n    {\n      \"domain_id\": \"string\",\n      \"name\": \"string\",\n      \"status\": \"active\" | \"inactive\",\n      \"domain_description\": \"string (optional, only in DETAILED mode)\",\n      \"domain_keywords\": [\"string\"] (optional, only in DETAILED mode)\n    }\n  ]\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"FIRESTORE_UNAVAILABLE\": The database is not responding. Retry the request.\n- \"PERMISSION_DENIED\": System lacks rights to read this user's data. Report to admin.\n- \"INVALID_USER_ID\": The ID format is malformed.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "The unique identifier of the user (from AGENT_ROOT) whose domains need to be fetched."
+      },
+      "status_filter": {
+        "type": "string",
+        "enum": [
+          "ALL",
+          "ACTIVE",
+          "INACTIVE"
+        ],
+        "default": "ALL",
+        "description": "Filter to retrieve only 'ACTIVE' or 'INACTIVE' domains. Defaults to 'ALL'."
+      },
+      "view_mode": {
+        "type": "string",
+        "enum": [
+          "BRIEF",
+          "DETAILED"
+        ],
+        "default": "BRIEF",
+        "description": "Determines the depth of information. 'BRIEF' returns lightweight metadata. 'DETAILED' includes descriptions and keywords."
+      }
+    },
+    "required": [
+      "user_id"
+    ],
+    "additionalProperties": false
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_generate_domain_snapshot.json
+
+{
+  "name": "generate_domain_snapshot",
+  "description": "SUMMARY: Generates a content snapshot for a specific knowledge domain by synthesizing facts from the Memory Bank into short and extended summaries.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates `user_id` and `domain_id`.\n2. Queries STORAGE_DOMAINS (Firestore) to retrieve the human-readable `domain_name`.\n3. Connects to the Memory Bank (Google ADK / VertexAiMemoryBankService) to fetch all recorded facts and fragments for this domain.\n4. Calculates metadata from raw facts: total count, total character length, and number of unique sources.\n5. Sends the retrieved facts to an external LLM to generate two outputs: a 'Super Summary' (~20 words) and an 'Extended Summary' (~150 words).\n6. Aggregates the name, summaries, and metadata into a final response.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON wrapper:\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"domain_id\": \"string\",\n    \"domain_name\": \"string\",\n    \"super_summary\": \"string (approx 20 words)\",\n    \"extended_summary\": \"string (approx 150 words)\",\n    \"meta_info\": {\n      \"fact_count\": integer,\n      \"total_char_length\": integer,\n      \"source_count\": integer\n    }\n  }\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"STORAGE_UNAVAILABLE\": Firestore is unreachable; cannot fetch domain name.\n- \"MEMORY_BANK_UNAVAILABLE\": VertexAiMemoryBankService failed to return facts.\n- \"LLM_UNAVAILABLE\": The external model failed to generate the summaries.\n- \"DOMAIN_NOT_FOUND\": The specified domain ID does not exist in storage.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "The unique identifier of the user (must match the ID used in `fetch_user_knowledge_domains`)."
+      },
+      "domain_id": {
+        "type": "string",
+        "description": "The specific ID of the knowledge domain to analyze."
+      }
+    },
+    "required": [
+      "user_id",
+      "domain_id"
+    ],
+    "additionalProperties": false
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_prettify_domain_description.json
+
+{
+  "name": "tool_prettify_domain_description",
+  "description": "SUMMARY: Uses an external LLM to decompose raw user text into a structured Domain definition (Name, Description, Keywords).\n\nLOGIC:\n1. Validates the `raw_input_text` is not empty.\n2. Sends the text to a generative AI model to synthesize a concise `name`, a formal `description`, and a list of `keywords`.\n3. If the LLM fails (timeout/auth), catches the exception and returns a structured error.\n4. Returns the synthesized object for the calling agent to present to the user.\n\nRETURN VALUE:\nReturns a JSON object wrapper:\n{\n  \"status\": \"SUCCESS\" | \"ERROR\",\n  \"data\": {\n    \"name\": \"string (The generated domain title)\",\n    \"description\": \"string (Formalized explanation)\",\n    \"keywords\": [\"string\", \"string\"] (Array of tags)\n  },\n  \"error_details\": \"string (optional)\"\n}\n\nERRORS:\n- \"LLM_SERVICE_UNAVAILABLE\": Upstream API is down or timed out. Retry later.\n- \"LLM_AUTH_ERROR\": API Key invalid. Contact admin.\n- \"INPUT_TOO_SHORT\": Input text insufficient to generate a domain.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "raw_input_text": {
+        "type": "string",
+        "description": "The unstructured natural language text provided by the user describing their area of interest (e.g., 'I want to track everything about AI technologies')."
+      }
+    },
+    "required": [
+      "raw_input_text"
+    ]
+  }
+}
+--------------------------------------------------------------------------------
+
+FILE: tool_process_ordinary_page.json
+
+{
+    "name": "tool_process_ordinary_page",
+    "description": "SUMMARY: Scrapes a general web page to extract the main readable text content, stripping HTML boilerplate.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Initiates a web crawler/scraper request to the URL.\n2. Downloads the HTML DOM.\n3. Applies readability algorithms to remove navigation, ads, scripts, and styling.\n4. Returns the clean Markdown or plain text of the main content area.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"content\": \"string (cleaned text)\", \"page_title\": \"string\", \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"HTTP_ERROR_[CODE]\": e.g., 403 Forbidden, 404 Not Found.\n- \"TIMEOUT\": Target site took too long to respond.\n- \"EMPTY_CONTENT\": Parser could not identify main content (e.g., purely JS-rendered app without SSR).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The target website URL to scrape."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+--------------------------------------------------------------------------------
+
+FILE: tool_process_pdf_link.json
+
+{
+    "name": "tool_process_pdf_link",
+    "description": "SUMMARY: Extracts raw text content from a remote PDF file URL without using OCR.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates that the provided URL points to a downloadable resource.\n2. Connects to the external MCP/API to stream the file.\n3. Extracts text from the document layer (images and rasterized text are ignored).\n4. Returns the raw text string.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"content\": \"string (the extracted text)\", \"metadata\": { \"page_count\": integer }, \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"DOWNLOAD_FAILED\": Network issue or 404.\n- \"PROTECTED_FILE\": PDF is password locked.\n- \"PARSING_ERROR\": File is corrupt or contains no selectable text (scan-only PDF).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The direct URL to the PDF file to be processed."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+--------------------------------------------------------------------------------
+
+FILE: tool_process_youtube_link.json
+
+{
+    "name": "tool_process_youtube_link",
+    "description": "SUMMARY: Retrieves and processes the transcript (subtitles) from a specific YouTube video URL.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Parses the video ID from the provided URL.\n2. Calls the transcription MCP/API to check for available captions (manual or auto-generated).\n3. Downloads the transcript tracks and concatenates them into a single readable string.\n4. Returns the full text.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"content\": \"string (the full transcript)\", \"video_title\": \"string\", \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"VIDEO_UNAVAILABLE\": Video is private, deleted, or geoblocked.\n- \"NO_TRANSCRIPT_FOUND\": Video has no captions enabled.\n- \"INVALID_URL\": URL does not point to a valid YouTube watch page.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The full YouTube watch URL (e.g., https://www.youtube.com/watch?v=...)."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }
+--------------------------------------------------------------------------------
+
+FILE: tool_toggle_domain_status.json
+
+{
+  "name": "toggle_domain_status",
+  "description": "SUMMARY: Toggles the state of a specific knowledge domain (Active ↔ Inactive) for a user in Google Firestore.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates `user_id` and `domain_id`.\n2. Queries Google Firestore to find the specific domain document.\n3. Checks if the domain exists. If not, returns an error.\n4. Reads the current `status` and inverts it (e.g., if 'active' → sets to 'inactive'; if 'inactive' → sets to 'active').\n5. Persists the new state to Firestore.\n6. Returns both the previous state and the new state for confirmation.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON wrapper:\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"domain_id\": \"string\",\n    \"previous_status\": \"active\" | \"inactive\",\n    \"new_status\": \"active\" | \"inactive\"\n  }\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"DOMAIN_NOT_FOUND\": The combination of `user_id` and `domain_id` does not exist.\n- \"FIRESTORE_UNAVAILABLE\": Connectivity issue with the database.\n- \"PERMISSION_DENIED\": Agent/User lacks rights to modify this domain.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "The unique identifier of the user (must match the ID used in `fetch_user_knowledge_domains`)."
+      },
+      "domain_id": {
+        "type": "string",
+        "description": "The specific ID of the knowledge domain to toggle (obtained from the `fetch` tool)."
+      }
+    },
+    "required": [
+      "user_id",
+      "domain_id"
+    ],
+    "additionalProperties": false
+  }
+}
+--------------------------------------------------------------------------------
+

@@ -1,0 +1,31 @@
+{
+  "name": "tool_save_fact_to_memory",
+  "description": "SUMMARY: Saves a single fact to the Vertex AI Agent Engine Memory Bank using the CreateMemory operation.\n\nLOGIC:\n1. The tool receives the fact text and metadata (URL, User ID, Domain ID).\n2. Constructs the `scope` object, storing `source_url` and `user_id` for context.\n3. Maps `domain_id` to the target topic in the Memory Bank.\n4. Initiates a call to ADK / VertexAiMemoryBankService using the `CreateMemory` method (strictly creation, not generation).\n5. Returns the ID of the created record upon success.\n\nRETURN VALUE:\nReturns a JSON object in the format: { \"status\": \"success\", \"data\": { \"memory_id\": \"string\" }, \"error\": null }\n\nERRORS:\n- \"CONNECTION_FAILED\": Failed to establish connection with Vertex AI ADK.\n- \"TOPIC_NOT_FOUND\": The specified `domain_id` was not found in the Memory Bank configuration.\n- \"INVALID_PAYLOAD\": Missing required field (fact text or scope).\n- \"WRITE_ERROR\": Internal error writing to memory storage.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "fact_text": {
+        "type": "string",
+        "description": "Text content of the fact to be saved to memory."
+      },
+      "source_url": {
+        "type": "string",
+        "description": "Source URL from where the fact was derived. Saved in the scope field."
+      },
+      "user_id": {
+        "type": "string",
+        "description": "Unique user identifier. Saved in the scope field."
+      },
+      "domain_id": {
+        "type": "string",
+        "description": "Knowledge domain identifier. Corresponds to the topic parameter in Memory Bank."
+      }
+    },
+    "required": [
+      "fact_text",
+      "source_url",
+      "user_id",
+      "domain_id"
+    ]
+  }
+}

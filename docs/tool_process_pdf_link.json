@@ -1,0 +1,17 @@
+{
+    "name": "tool_process_pdf_link",
+    "description": "SUMMARY: Extracts raw text content from a remote PDF file URL without using OCR.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates that the provided URL points to a downloadable resource.\n2. Connects to the external MCP/API to stream the file.\n3. Extracts text from the document layer (images and rasterized text are ignored).\n4. Returns the raw text string.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON object: { \"status\": \"success\" | \"error\", \"content\": \"string (the extracted text)\", \"metadata\": { \"page_count\": integer }, \"error_detail\": \"string (optional)\" }.\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"DOWNLOAD_FAILED\": Network issue or 404.\n- \"PROTECTED_FILE\": PDF is password locked.\n- \"PARSING_ERROR\": File is corrupt or contains no selectable text (scan-only PDF).",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The direct URL to the PDF file to be processed."
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  }

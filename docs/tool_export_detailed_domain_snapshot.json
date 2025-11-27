@@ -1,0 +1,22 @@
+{
+  "name": "tool_export_detailed_domain_snapshot",
+  "description": "SUMMARY: Generates a comprehensive Markdown report containing all metadata and facts for a specific domain, uploads it to S3, and returns a download link.\n\nLOGIC (ЛОГИКА РАБОТЫ):\n1. Validates `user_id` and `domain_id`.\n2. Queries STORAGE_DOMAINS (Firestore) to retrieve domain metadata: Name, Description, and Keywords.\n3. Connects to the Memory Bank (Google ADK / VertexAiMemoryBankService) to fetch all recorded facts and associated metadata for this domain.\n4. Checks if facts exist. If the list is empty, returns status indicating no data to export.\n5. Compiles retrieved data into a formatted Markdown file.\n6. Uploads the file to the S3 storage bucket.\n7. Returns the download URL and file size.\n\nRETURN VALUE (ВОЗВРАЩАЕМОЕ ЗНАЧЕНИЕ):\nReturns a JSON wrapper:\n{\n  \"status\": \"success\",\n  \"data\": {\n    \"domain_id\": \"string\",\n    \"download_url\": \"string (URI)\",\n    \"file_size_bytes\": integer,\n    \"file_format\": \"markdown\"\n  }\n}\n\nERRORS (ВОЗМОЖНЫЕ ОШИБКИ):\n- \"DOMAIN_NOT_FOUND\": The specified domain ID does not exist in STORAGE_DOMAINS.\n- \"NO_FACTS_FOUND\": The domain exists, but the Memory Bank contains no facts to export.\n- \"STORAGE_DOMAINS_UNAVAILABLE\": Firestore is unreachable.\n- \"MEMORY_BANK_UNAVAILABLE\": VertexAiMemoryBankService failed to return facts.\n- \"S3_UPLOAD_FAILED\": The system failed to upload the generated report to object storage.\n- \"INTERNAL_ERROR\": Error during Markdown compilation.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "user_id": {
+        "type": "string",
+        "description": "The unique identifier of the user (must match the ID used in `fetch_user_knowledge_domains`)."
+      },
+      "domain_id": {
+        "type": "string",
+        "description": "The specific ID of the knowledge domain to export."
+      }
+    },
+    "required": [
+      "user_id",
+      "domain_id"
+    ],
+    "additionalProperties": false
+  }
+}
