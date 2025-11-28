@@ -1,240 +1,260 @@
-# IMPLEMENTATION PLAN: Google ADK Multi-Agent System (v4.0)
+# Phase 2: Detailed Implementation Roadmap (Revised)
 
-**Strategy:** "Walking Skeleton" (Layered Implementation).
-**Tech Stack:** Python 3.13, Google ADK, Firestore, Vertex AI.
+**Selected Strategy:** Concept 1: The "Nervous System" (Skeleton First).
+**Philosophy:** We will build the complete Agent Orchestration Graph immediately using **Mock Tools**. This allows us to validate the complex routing, state management, and `prompts.yaml` structure before dealing with database connections or external API flakes.
 
------
+**Revision Note:** Added **Phase 0** for explicit environment and cloud infrastructure preparation.
 
-## PHASE 0: Environment & Cloud Setup (BOOTSTRAP)
+---
 
-**Goal:** Prepare the local environment, configure Google Cloud Platform (GCP), and set up access rights. **Blocking Phase:** Agent code cannot run without this step.
+### Step 2.1: The "Walking Skeleton" Implementation Matrix
 
-### Steps
+| Component | Phase 0: Env & Infra | Phase 1: Foundation | Phase 2: The Mocked Brain | Phase 3: Real Tools |
+| :--- | :--- | :--- | :--- | :--- |
+| **Infra & Auth** | ✅ Real (GCP/Venv) | — | — | — |
+| **Config & Logs** | — | ✅ Real (YAML/Env) | ✅ Real (Tracing) | — |
+| **Agent: Root** | — | — | ✅ Real Logic / 🎭 Mocks | ✅ Real Logic / ✅ Real Tools |
+| **Sub-Agents** | — | — | ✅ Real Logic / 🎭 Mocks | ✅ Real Logic / ✅ Real Tools |
+| **Tools (All)** | — | — | 🎭 Mock (Static JSON) | ✅ Real (Firestore/Vertex) |
 
-#### Step 0.1: Google Cloud Project Provisioning
+---
 
-1.  **Project Creation:** Create a new Google Cloud Project (or select an existing one).
-2.  **API Enablement:** Enable the following mandatory APIs:
-      * `aiplatform.googleapis.com` (Vertex AI / Gemini)
-      * `firestore.googleapis.com` (Native Mode Database)
-      * `cloudtrace.googleapis.com` (Trace)
-      * `logging.googleapis.com` (Logging)
-      * `secretmanager.googleapis.com` (Optional, for better secret management)
-3.  **Service Account (SA):** Create a service account `agent-backend-sa`.
-      * **Roles:**
-          * `roles/datastore.user` (Firestore Read/Write)
-          * `roles/aiplatform.user` (Gemini/Vertex Invocation)
-          * `roles/logging.logWriter` (Log writing)
-          * `roles/cloudtrace.agent` (Trace submission)
-      * **Key:** Generate a JSON key and save it locally (add path to `.env`).
+### Step 2.2: Step-by-Step Plan
 
-#### Step 0.2: Cloud Infrastructure Init
+#### PHASE 0: ENVIRONMENT & CLOUD PREPARATION
 
-1.  **Firestore:** Initialize the database in **Native Mode**.
-      * Create empty collections: `users`, `knowledge_domains`.
-2.  **Vertex AI Agent Engine:**
-      * Activate Agent Engine in the console.
-      * Ensure the region supports Gemini Pro 1.5.
+### [Step 0.1] Local Development Environment Setup
+**Goal:** Prepare the Python environment and define the strict dependency list. **Effort:** Small.
 
-#### Step 0.3: Local Dev Environment
+*   **Justification:** Ensures reproducible builds and prevents "it works on my machine" issues.
+*   **Scope & Dependencies:**
+    *   Verify Python 3.13 installation.
+    *   Create and activate a virtual environment (`.venv`).
+    *   Create `requirements.txt` with pinned versions.
+*   **Dependency List (Add to requirements.txt):**
+    *   **Core/Utils:** `pydantic>=2.0`, `pydantic-settings`, `pyyaml`, `python-dotenv`.
+    *   **Google Cloud:** `google-cloud-firestore`, `google-cloud-aiplatform` (Vertex AI), `google-generativeai` (Gemini), `google-cloud-logging`, `google-cloud-trace`.
+    *   **Content Processing:** `requests`, `beautifulsoup4`, `pypdf`, `youtube-transcript-api`.
+    *   **Testing/Dev:** `pytest`, `pytest-mock`.
+*   **Definition of Done:**
+    *   Command: `pip install -r requirements.txt && python -c "import google.cloud.firestore; import pydantic; print('Env Ready')"`
+    *   Success Criteria: Prints "Env Ready" without import errors.
 
-1.  **Python Setup:** Install Python 3.13. Create a virtual environment (`venv`).
-2.  **Dependencies Installation:** Create and install `requirements.txt`:
-    ```text
-    # Core Google Cloud
-    google-cloud-aiplatform>=1.38.0  # Vertex AI & GenAI
-    google-cloud-firestore>=2.14.0   # Database
-    google-cloud-logging>=3.9.0      # Observability
-    google-cloud-trace>=1.11.0       # Observability
+### [Step 0.2] Google Cloud Infrastructure Provisioning
+**Goal:** Create the GCP Project, enable required APIs, and generate Service Account credentials. **Effort:** Medium.
 
-    # Agent Framework & Utilities
-    pydantic>=2.5.0                  # Data Validation
-    python-dotenv>=1.0.0             # Secrets Management
-    PyYAML>=6.0                      # Config Parsing
-    tenacity>=8.2.0                  # Retries
+*   **Justification:** The code in Phase 3 will fail immediately without these permissions.
+*   **Scope & Dependencies:**
+    *   **Project:** Create a new GCP Project (e.g., `agent-memory-bank-dev`).
+    *   **APIs to Enable:**
+        *   `firestore.googleapis.com` (Database)
+        *   `aiplatform.googleapis.com` (Vertex AI)
+        *   `generativelanguage.googleapis.com` (Gemini API)
+        *   `logging.googleapis.com` (Cloud Logging)
+        *   `cloudtrace.googleapis.com` (Cloud Trace)
+    *   **IAM:** Create a Service Account (SA) named `agent-backend-sa`.
+    *   **Roles:** Grant `Firestore User`, `Vertex AI User`, `Logs Writer`, `Cloud Trace Agent`.
+    *   **Keys:** Download the JSON key file for this SA (save locally as `service_account.json` - **ADD TO .GITIGNORE**).
+*   **Definition of Done:**
+    *   Command: Manual Verification via GCP Console.
+    *   Success Criteria: APIs are enabled, and you possess the `service_account.json` file.
 
-    # Tool Specifics
-    youtube-transcript-api>=0.6.1    # tool_process_youtube_link
-    beautifulsoup4>=4.12.0           # tool_process_ordinary_page
-    httpx>=0.26.0                    # tool_process_pdf_link (Streaming)
-    boto3>=1.34.0                    # tool_export_detailed_domain_snapshot (S3)
-    markdown>=3.5.0                  # Formatting reports
+### [Step 0.3] Secrets & Environment Configuration
+**Goal:** Establish the secure configuration entry point. **Effort:** Small.
+
+*   **Justification:** The application must never contain hardcoded keys.
+*   **Scope & Dependencies:**
+    *   Create `.env` file (add to `.gitignore`).
+    *   Create `.env.example` (safe template).
+*   **Required Variables:**
+    ```ini
+    GOOGLE_APPLICATION_CREDENTIALS="path/to/service_account.json"
+    GOOGLE_CLOUD_PROJECT="your-project-id"
+    # Optional: If using AI Studio API Key instead of Vertex SA
+    GOOGLE_API_KEY="your-gemini-api-key"
     ```
-3.  **Config Initialization:**
-      * Create `.env` based on a template.
-      * Add variables: `GOOGLE_APPLICATION_CREDENTIALS` (path to JSON key), `GOOGLE_CLOUD_PROJECT`, `GOOGLE_API_KEY` (if using AI Studio, though Vertex AI SA is preferred).
+*   **Definition of Done:**
+    *   Command: `cat .env`
+    *   Success Criteria: File exists and contains the paths/IDs from Step 0.2.
 
-### Verification (Definition of Done)
+---
 
-  * **Check 1:** Command `gcloud projects describe <PROJECT_ID>` returns active status.
-  * **Check 2:** Script `python -c "import google.cloud.firestore; print('Success')"` executes without errors.
-  * **Check 3:** Firestore collections are visible in the GCP console.
+#### PHASE 1: FOUNDATION & CONFIGURATION
 
------
+### [Step 1] Configuration Engine & Prompts Loader
+**Goal:** Implement the strict separation of Code, Config, and Prompts. **Effort:** Small.
 
-## PHASE 1: Foundation & Configuration Infrastructure
+*   **Justification:** The `prompts.yaml` and `.env` requirements are strict constraints. Retrofitting them later is painful.
+*   **Scope & Dependencies:**
+    *   Create `config/prompts.yaml` (copy content from Agent JSONs "system_instruction").
+    *   Create `config/config.yaml` (model parameters, thresholds).
+    *   Implement `src/utils/config_loader.py` (Singleton pattern).
+*   **Coding Instructions:**
+    *   Use `pydantic-settings` or `pyyaml` for safe loading.
+    *   Ensure `load_prompts()` returns a dictionary accessible by Agent ID.
+    *   **Security:** Ensure the loader raises an error if credentials are missing in `.env`.
+*   **Definition of Done:**
+    *   Command: `python tests/unit/test_config.py`
+    *   Criteria: Script prints a specific prompt string loaded from YAML and a config value (e.g., `temperature: 0.0`).
 
-**Goal:** Initialize the application skeleton, enforce configuration decoupling, and set up observability primitives.
+### [Step 2] Observability & Logging Wrapper
+**Goal:** Implement standardized logging and tracing decorators to satisfy `observability.md`. **Effort:** Small.
 
-### Steps
+*   **Justification:** We need to trace the execution flow across agents from Day 1 to debug the "Nervous System".
+*   **Scope & Dependencies:**
+    *   Implement `src/utils/logger.py` (Structured JSON logging).
+    *   Implement `src/utils/telemetry.py` (Mockable tracing decorator).
+*   **Coding Instructions:**
+    *   Logger must support `mask_pii(text)` function (truncate >200 chars).
+    *   Decorator `@trace_span` should capture `function_name` and `args` (masked).
+    *   Ensure logs include `prompt_version_sha` (dummy value for now) as per requirements.
+*   **Definition of Done:**
+    *   Command: `python tests/unit/test_telemetry.py`
+    *   Criteria: Output shows a JSON log entry with `severity: INFO` and a masked "fact_text" field.
 
-1.  **Config Decoupling:**
-      * Create `config.yaml`: Store model parameters (temp, top-k), `relevance_threshold` (default 0.7).
-      * Create `prompts.yaml`: Extract all `system_instruction` texts from the JSON specifications into this file.
-2.  **Observability Module:**
-      * Implement `logger.py`.
-      * **Feature:** `mask_pii(text)` function to truncate texts \> 200 chars.
-      * **Feature:** JSON logging with fields: `trace_id`, `prompt_version_hash`, `model_config_id`.
+---
 
-### Verification (Definition of Done)
+#### PHASE 2: THE MOCKED NERVOUS SYSTEM
 
-  * **Test T-15 (Secrets):** Run app without `.env`. Assert system crash/exit.
-  * **Test T-13 (Tracing):** Verify logs contain `prompt_version_hash`.
+### [Step 3] Tool Interfaces & Mock Implementations
+**Goal:** Define the Python functions for all 12 tools but implement them as **Mocks** returning static data. **Effort:** Medium.
 
------
+*   **Justification:** Agents need valid callables to function. Mocks allow us to test Agent logic without paying for API calls.
+*   **Scope & Dependencies:**
+    *   Create `src/tools/auth.py`, `src/tools/domains.py`, `src/tools/content.py`, `src/tools/memory.py`.
+    *   Implement all tools defined in the JSON specs.
+*   **Mock Strategy:**
+    *   **MOCKED:** All tools.
+    *   Example: `tool_auth_user` returns `{"status": "success", "data": {"user_id": "mock_u1", "is_new_user": false}}`.
+    *   Example: `tool_process_pdf_link` returns `{"content": "Mock PDF text about AI..."}`.
+*   **Coding Instructions:**
+    *   Use Pydantic models for Input/Output validation to enforce the JSON schemas strictly.
+    *   Add artificial random delays (0.1s) to simulate network I/O.
+*   **Definition of Done:**
+    *   Command: `python tests/unit/test_tools_mock.py`
+    *   Criteria: All 12 tools return valid JSON matching their spec schemas.
 
-## PHASE 2: Routing Core & Authentication
+### [Step 4] Agent Root Implementation (Orchestrator)
+**Goal:** Implement `agent_root` logic to handle Auth and Routing using the Mocks. **Effort:** Medium.
 
-**Goal:** Implement `agent_root` and User Authentication.
+*   **Justification:** This is the entry point. We must verify it correctly identifies URLs vs. Domain Commands.
+*   **Scope & Dependencies:**
+    *   Implement `src/agents/agent_root.py`.
+    *   Dependencies: `prompts.yaml` (Step 1), Mock Tools (Step 3).
+*   **Mock Strategy:**
+    *   **REAL:** Routing logic, Regex for URL detection, Prompt construction.
+    *   **MOCKED:** `tool_auth_user`, `tool_fetch_user_knowledge_domains`.
+*   **Coding Instructions:**
+    *   Load system instruction from `prompts.yaml`.
+    *   Implement the "PHASE 1" and "PHASE 2" logic from `agent_root.json`.
+    *   **Crucial:** Return a structured object indicating `delegation_target` instead of actually calling the sub-agent class (dependency injection comes later).
+*   **Definition of Done:**
+    *   Command: `python tests/e2e/test_agent_root_flow.py`
+    *   Criteria:
+        *   Input "My name is Alice" -> Returns `SUCCESS` + Domain List (Mocked).
+        *   Input "Check this http://example.com" -> Returns `DELEGATE` to `subagent_document_processor`.
 
-### Steps
+### [Step 5] Sub-Agent: Domain Lifecycle (Mocked)
+**Goal:** Implement the Create/Update domain workflow. **Effort:** Medium.
 
-1.  **Tool Implementation:**
-      * Implement `tool_auth_user.py` connected to **Firestore** (Collection: `users`).
-2.  **Agent Implementation:**
-      * Implement `agent_root.py`.
-      * Load prompts from `prompts.yaml`.
-      * Implement **Route Classification**:
-          * URL regex detection -\> Route to `subagent_document_processor`.
-          * Keywords ("create", "edit") -\> Route to `subagent_domain_lifecycle`.
-          * Keywords ("export") -\> Route to `tool_export_detailed_domain_snapshot`.
-3.  **Mocking:**
-      * Create "Mock" versions of `subagent_document_processor` and `subagent_domain_lifecycle` that simply return a success message.
+*   **Justification:** Verify the "Draft -> Confirm -> Save" loop without touching Firestore.
+*   **Scope & Dependencies:**
+    *   Implement `src/agents/subagent_domain_lifecycle.py`.
+*   **Mock Strategy:**
+    *   **REAL:** State machine (Drafting vs Saving).
+    *   **MOCKED:** `tool_prettify_domain_description` (returns fixed keywords), `firestore_connector` (prints "Saved").
+*   **Coding Instructions:**
+    *   Logic: If `confirmation_status` is False, return draft. If True, call save tool.
+    *   Ensure `tool_prettify` mock returns valid JSON structure (`name`, `description`, `keywords`).
+*   **Definition of Done:**
+    *   Command: `python tests/e2e/test_domain_lifecycle.py`
+    *   Criteria: Two-turn conversation. Turn 1 returns "Review this draft". Turn 2 (Confirmed) returns "Saved".
 
-### Verification (Definition of Done)
+### [Step 6] Sub-Agent: Document Processor (Mocked)
+**Goal:** Implement the complex URL ingestion loop. **Effort:** Large.
 
-  * **Test T-01 (Routing):** Input URL -\> Verify delegation to Doc Processor. Input "Create topic" -\> Delegation to Lifecycle.
-  * **Test T-02 (Auth):** Input "Hello" (no ID) -\> Verify agent calls `tool_auth_user`.
-  * **Test T-08 (Errors):** Simulate Firestore downtime. Verify user gets a friendly error message.
+*   **Justification:** This agent has the most complex logic (Relevance Loop -> Fact Extraction -> Batch Save). We must debug this flow with controllable mocks.
+*   **Scope & Dependencies:**
+    *   Implement `src/agents/subagent_document_processor.py`.
+*   **Mock Strategy:**
+    *   **REAL:** URL Classification (Regex), Relevance Filtering Logic, Batch Save Logic.
+    *   **MOCKED:** `tool_process_*` (returns text), `tool_define_topic_relevance` (returns 0.9), `tool_extract_facts` (returns 2 facts).
+*   **Coding Instructions:**
+    *   Implement the "PHASE 3: RELEVANCE LOOP" strictly.
+    *   **Critical Test:** Ensure `candidate_facts` output matches the input required for the "Save Mode" turn.
+*   **Definition of Done:**
+    *   Command: `python tests/e2e/test_doc_processor.py`
+    *   Criteria:
+        *   Input URL -> Returns `review_required` with 2 mock facts.
+        *   Input `selected_fact_ids` -> Calls `tool_save_fact` 2 times (verified via Mock call count).
 
------
+---
 
-## PHASE 3: Domain Lifecycle (Ontology)
+#### PHASE 3: WIRING THE HANDS (REAL TOOLS)
 
-**Goal:** Enable users to Create, Update, and Toggle Knowledge Domains in Firestore.
+### [Step 7] Real Auth & Firestore Tools
+**Goal:** Replace mocks with real Google Firestore implementations. **Effort:** Medium.
 
-### Steps
+*   **Justification:** Persistent user/domain state is the backbone of the system.
+*   **Scope & Dependencies:**
+    *   Modify `src/tools/auth.py` and `src/tools/domains.py`.
+    *   Requires `google-cloud-firestore` (Installed in Phase 0).
+*   **Coding Instructions:**
+    *   Use `GOOGLE_APPLICATION_CREDENTIALS` from env.
+    *   Implement `tool_auth_user`: Check collection `users`.
+    *   Implement `tool_fetch_...`: Query collection `domains` with filters.
+*   **Definition of Done:**
+    *   Command: `python tests/integration/test_firestore_real.py`
+    *   Criteria: Run script twice. First time: "New User". Second time: "Existing User". Data visible in Firestore Console.
 
-1.  **Tools Implementation:**
-      * `tool_fetch_user_knowledge_domains` (Firestore Read).
-      * `tool_toggle_domain_status` (Firestore Update).
-      * `tool_prettify_domain_description` (LLM Call - Gemini).
-2.  **Agent Implementation:**
-      * Implement `subagent_domain_lifecycle.py`.
-      * Logic: Receive raw text -\> Call Prettify -\> **Wait for Confirmation** -\> Write to Firestore.
+### [Step 8] Real Content Fetching Tools
+**Goal:** Implement real web scraping and YouTube transcript fetching. **Effort:** Medium.
 
-### Verification (Definition of Done)
+*   **Justification:** We need real text to test the LLM's extraction capabilities.
+*   **Scope & Dependencies:**
+    *   Modify `src/tools/content.py`.
+    *   Libs: `requests`, `beautifulsoup4`, `youtube-transcript-api`.
+*   **Coding Instructions:**
+    *   **Security:** Use a User-Agent header for scraping.
+    *   `tool_process_pdf_link`: Download to memory, use `pypdf` to extract text.
+    *   `tool_process_youtube_link`: Handle `TranscriptsDisabled` exception gracefully.
+*   **Definition of Done:**
+    *   Command: `python tests/integration/test_content_real.py`
+    *   Criteria: Successfully extracts text from a provided Wikipedia URL and a YouTube video ID.
 
-  * **Test T-03 (Confirmation Loop):** Send `confirmation_status=false`. Assert NO write to Firestore.
-  * **Test T-09 (Structure):** Verify "raw text" is converted to structured JSON (Name, Keywords).
+### [Step 9] Real Intelligence Tools (Gemini)
+**Goal:** Connect the AI tools to Google Gemini API. **Effort:** Medium.
 
------
+*   **Justification:** Enable actual semantic analysis and fact extraction.
+*   **Scope & Dependencies:**
+    *   Modify `src/tools/ai_analysis.py` (Prettify, Relevance, Extract).
+    *   Libs: `google-generativeai` or Vertex AI SDK.
+*   **Coding Instructions:**
+    *   Use `model_config` from `config.yaml`.
+    *   Implement `tool_define_topic_relevance`: Send prompt, parse float score.
+    *   Implement `tool_extract_facts_from_text`: Send prompt, parse JSON list.
+*   **Definition of Done:**
+    *   Command: `python tests/integration/test_ai_real.py`
+    *   Criteria: Pass a text about "Apples" and domain "Fruit". Relevance score > 0.8. Facts extracted successfully.
 
-## PHASE 4: Content Discovery (Analysis Only)
+### [Step 10] Real Memory Bank (Vertex AI)
+**Goal:** Connect `tool_save_fact_to_memory` to Vertex AI Agent Engine. **Effort:** Medium.
 
-**Goal:** Fetch content from URLs, determine relevance, and extract candidate facts. **(No saving yet)**.
+*   **Justification:** Final step to complete the E2E loop.
+*   **Scope & Dependencies:**
+    *   Modify `src/tools/memory.py`.
+*   **Coding Instructions:**
+    *   Use `VertexAiMemoryBankService` (or equivalent REST API if SDK is limited).
+    *   Map `domain_id` to the Memory Bank `topic`.
+*   **Definition of Done:**
+    *   Command: `python tests/integration/test_memory_real.py`
+    *   Criteria: Successfully creates a memory record and returns a valid `memory_id` from Google Cloud.
 
-### Steps
+---
 
-1.  **Fetch Tools:**
-      * `tool_process_pdf_link` (Stream/Parse via `httpx`).
-      * `tool_process_youtube_link` (Transcript API via `youtube-transcript-api`).
-      * `tool_process_ordinary_page` (Scraper via `bs4`).
-2.  **Intelligence Tools:**
-      * `tool_define_topic_relevance`: Compare content vs. Domain using `relevance_threshold`.
-      * `tool_extract_facts_from_text`: Extract atomic facts with IDs.
-3.  **Agent Logic (Phases 1-3):**
-      * Implement `subagent_document_processor`.
-      * **Logic:** Detect URL Type -\> Fetch Content -\> Fetch Active Domains -\> Check Relevance -\> Extract Facts.
-      * **Output:** Return `status: "review_required"` with `candidate_facts` array.
+### Execution Instructions for Codex CLI
 
-### Verification (Definition of Done)
-
-  * **Test T-04 (URL Heuristics):** Verify correct tool selection for PDF vs. YouTube.
-  * **Test T-10 (Threshold):** Feed irrelevant text. Verify `relevance_score` \< 0.7 triggers discard.
-  * **Test T-05 (Contract):** Verify output JSON includes `source_url` in `candidate_facts`.
-
------
-
-## PHASE 5: Knowledge Persistence (Memory Bank)
-
-**Goal:** Implement the "Write" side of the Memory Bank using Vertex AI.
-
-### Steps
-
-1.  **Tool Implementation:**
-      * Implement `tool_save_fact_to_memory.json`.
-      * **Integration:** Connect to **Vertex AI Agent Engine** (CreateMemory API).
-      * **Scope:** Must map `source_url` and `user_id` to the memory scope.
-2.  **Agent Logic (Phase 4):**
-      * Update `subagent_document_processor`.
-      * **Loop:** Receive `selected_fact_ids` -\> Iterate `facts_payload` -\> Call `tool_save_fact_to_memory` for each match.
-3.  **Observability:**
-      * Ensure `tool_save_fact_to_memory` creates a **Child Span** of the parent `save_facts_batch` span.
-      * Log masking: Truncate `fact_text` to 200 chars.
-
-### Verification (Definition of Done)
-
-  * **Test T-06 (Batch Loop):** Select 3 facts. Verify tool is called exactly 3 times.
-  * **Test T-07 (Atomic Write):** Verify `memory_id` is returned on success.
-  * **Test T-16 (Metrics):** Check `mas/fact_save_latency` metric generation.
-
------
-
-## PHASE 6: Reporting & Exports
-
-**Goal:** Enable reading from Memory Bank and generating reports.
-
-### Steps
-
-1.  **Tools Implementation:**
-      * `tool_generate_domain_snapshot`: Read from Memory Bank -\> LLM Summary.
-      * `tool_export_detailed_domain_snapshot`: Aggregate Data -\> Generate Markdown -\> Upload to S3 -\> Return Link.
-2.  **Integration:**
-      * Ensure `agent_root` correctly routes "summary" and "export" requests to these tools.
-
-### Verification (Definition of Done)
-
-  * **Manual Verification:** Request "Export detailed report". Verify the returned URL downloads a valid Markdown file containing facts saved in Phase 5.
-
------
-
-### IMPLEMENTATION MATRIX (v4.0)
-
-| Category | Component / Artifact | **Phase 0: Env Setup** | **Phase 1: Infra** | **Phase 2: Core** | **Phase 3: Ontology** | **Phase 4: Content** | **Phase 5: Memory** | **Phase 6: Reporting** |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **CLOUD** | **GCP Project & IAM** | ✅ **Real** (SAs, APIs) | — | — | — | — | — | — |
-| | **DB: Firestore** | ✅ **Real** (Init) | — | — | — | — | — | — |
-| | **DB: Vertex Agent** | ✅ **Real** (Enable) | — | — | — | — | ✅ **Real** (Write) | 🔄 **Update** (Read) |
-| **INFRA** | **Dependencies** | ✅ **Real** (`pip`) | — | — | — | — | — | — |
-| | **Secrets (.env)** | ⚙️ Template | ✅ **Real** (Load) | — | — | — | — | — |
-| | **Logging / Trace** | — | ✅ **Real** (Lib) | ✅ **Real** (Trace) | — | — | 🔄 **Update** (Child) | — |
-| **AGENTS** | `agent_root` | — | ⚙️ Prompts | ✅ **Real** (Logic) | 🔄 **Update** (Fetch) | — | — | 🔄 **Update** (Report) |
-| | `subagent_lifecycle` | — | ⚙️ Prompts | 🎭 **Mock** | ✅ **Real** (CRUD) | — | — | — |
-| | `subagent_doc_proc` | — | ⚙️ Prompts | 🎭 **Mock** | — | ✅ **Real** (Analysis) | 🔄 **Update** (Save) | — |
-| **TOOLS** | `tool_auth_user` | — | — | ✅ **Real** (Firestore) | — | — | — | — |
-| | `tool_fetch_domains` | — | — | 🎭 **Mock** | ✅ **Real** (Read) | — | — | — |
-| | `tool_toggle_status` | — | — | — | ✅ **Real** (Update) | — | — | — |
-| | `tool_prettify` | — | — | — | ✅ **Real** (LLM) | — | — | — |
-| | `tool_process_*` | — | — | — | — | ✅ **Real** (Fetch) | — | — |
-| | `tool_define_relev` | — | — | — | — | ✅ **Real** (LLM) | — | — |
-| | `tool_save_memory` | — | — | — | — | 🎭 **Mock** | ✅ **Real** (Vertex) | — |
-| | `tool_export/snap` | — | — | — | — | — | — | ✅ **Real** (S3/LLM) |
-
-**Legend:**
-
-  * ⚪ **Pending:** Not started / Out of scope.
-  * ⚙️ **Config:** Configuration, setup, or interface definition only.
-  * 🎭 **Mock:** Hardcoded "Happy Path" response (Stub).
-  * ✅ **Real:** Fully implemented business logic.
-  * 🔄 **Update:** Refactoring or extending existing component.
+1.  Start with **Phase 0 (Steps 0.1 - 0.3)**. Do not proceed until the environment is fully provisioned and validated.
+2.  Proceed to **Phase 1** to lay the code foundation.
+3.  In **Phase 2**, strictly implement Mocks. Do not try to connect to the Cloud services you set up in Phase 0 yet.
+4.  In **Phase 3**, verify each Real Tool against the Cloud Infrastructure individually before running the full agent loop.

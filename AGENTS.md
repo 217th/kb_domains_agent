@@ -7,6 +7,11 @@ Contains project and system design artifacts of a multi-agent system using Googl
 
 - implementation_plan.md - CRITICAL: Follow this plan strictly. Complete development strictly according to phases and steps. Perform testing and explain the results to me at the end of each step. Explain to me how I can ensure that the step has been fully implemented.
 
+1.  Start with **Phase 0 (Steps 0.1 - 0.3)**. Do not proceed until the environment is fully provisioned and validated.
+2.  Proceed to **Phase 1** to lay the code foundation.
+3.  In **Phase 2**, strictly implement Mocks. Do not try to connect to the Cloud services you set up in Phase 0 yet.
+4.  In **Phase 3**, verify each Real Tool against the Cloud Infrastructure individually before running the full agent loop.
+
 Agents specifications:
 - agent_root.json
 - subagent_document_processor.json
