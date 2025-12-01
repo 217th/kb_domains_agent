@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CMD="${1:-}"
+shift || true
+
+case "$CMD" in
+  web)
+    # Simple wrapper to run the FastAPI harness
+    exec .venv/bin/uvicorn server.adk_web:app --reload --host 0.0.0.0 --port 8000 "$@"
+    ;;
+  webui)
+    # Launch official ADK Web UI (requires npm and network to fetch adk-web package)
+    API_URL="${API_URL:-http://127.0.0.1:8000}"
+    # Allow overriding package name/version if needed, default to @google/adk-web
+    ADK_WEB_PKG="${ADK_WEB_PKG:-@google/adk-web}"
+    exec npx -y "$ADK_WEB_PKG" serve --api "$API_URL" "$@"
+    ;;
+  chat)
+    exec .venv/bin/python -m src.cli.chat "$@"
+    ;;
+  *)
+    echo "Usage: ./adk web [uvicorn args] | ./adk webui [--api http://...] (requires npm) | ./adk chat" >&2
+    exit 1
+    ;;
+esac

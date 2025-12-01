@@ -144,6 +144,10 @@ ENV/
 env.bak/
 venv.bak/
 
+# GCP credentials
+service_account.json
+kb-agent-*.json
+
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -153,6 +157,7 @@ venv.bak/
 
 # mkdocs documentation
 /site
+/docs
 /docs/- old
 
 # mypy
@@ -201,6 +206,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+codex*
 
 # Marimo
 marimo/_static/

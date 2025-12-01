@@ -1,0 +1,20 @@
+model_config:
+  default:
+    model_id: models/gemini-2.5-flash
+    temperature: 0.2
+    top_k: 40
+    top_p: 0.95
+    max_output_tokens: 10000
+  overrides:
+    agent_root:
+      temperature: 0.0
+    subagent_domain_lifecycle:
+      temperature: 0.0
+    subagent_document_processor:
+      temperature: 0.0
+      top_k: 40
+      top_p: 0.95
+
+thresholds:
+  subagent_document_processor:
+    relevance: 0.7

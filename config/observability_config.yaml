@@ -1,0 +1,8 @@
+logging:
+  prompt_version_sha: local-dev
+  model_config_profile: default
+  agent_version: v0.0.1
+
+tracing:
+  sampling_rate: 1.0
+  default_trace_id: local-trace

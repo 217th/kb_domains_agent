@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+"""
+Subagent: Domain Lifecycle
+- Drafts domain via prettify tool.
+- Awaits confirmation; on confirm can persist to Firestore when RUN_REAL_DOMAINS=1, else mock save.
+"""
+
+import os
+import random
+import string
+from typing import Any, Dict
+
+from google.cloud import firestore
+
+from src.utils.logger import get_logger
+from src.utils.telemetry import trace_span
+from src.tools.domains import tool_prettify_domain_description
+from src.utils.config_loader import ConfigLoader, load_model_config, load_prompts
+
+logger = get_logger("subagent_domain_lifecycle")
+
+
+def _generate_id(length: int = 6) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+
+def _persist_domain(doc_id: str, user_id: str, draft: Dict[str, Any]) -> None:
+    settings = ConfigLoader.instance().settings
+    client = firestore.Client(database=settings.firestore_database or "(default)")
+    doc_ref = client.collection("domains").document(doc_id)
+    doc_ref.set(
+        {
+            "user_id": user_id,
+            "name": draft["name"],
+            "status": "active",
+            "domain_description": draft["description"],
+            "domain_keywords": draft["keywords"],
+        }
+    )
+
+
+@trace_span(span_name="subagent_domain_lifecycle_turn", component="subagent_domain_lifecycle")
+def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
+    _ = load_prompts().get("subagent_domain_lifecycle")
+    _ = load_model_config("subagent_domain_lifecycle")
+
+    operation_type = payload.get("operation_type")
+    user_id = payload.get("user_id")
+    user_input = payload.get("user_input", "")
+    confirmation_status = bool(payload.get("confirmation_status", False))
+    domain_id = payload.get("domain_id")
+
+    if not operation_type or not user_id or not user_input:
+        return {
+            "reasoning": "Missing required fields.",
+            "status": "READ_ERROR",
+            "message_to_user": "operation_type, user_id, and user_input are required.",
+        }
+
+    prettified = tool_prettify_domain_description({"raw_input_text": user_input})
+    if prettified.get("status") != "SUCCESS":
+        logger.error(
+            "PRETTIFY_FAILED",
+            raw_input=user_input,
+            error_details=prettified.get("error_details") or prettified.get("error_detail"),
+        )
+        return {
+            "reasoning": "Prettify tool failed.",
+            "status": "READ_ERROR",
+            "message_to_user": "Could not draft domain. Please retry.",
+        }
+
+    draft = {
+        "domain_id": domain_id or _generate_id(),
+        "name": prettified["data"]["name"],
+        "description": prettified["data"]["description"],
+        "keywords": prettified["data"]["keywords"],
+    }
+
+    if not confirmation_status:
+        return {
+            "reasoning": "Draft prepared; awaiting user confirmation.",
+            "status": "AWAITING_USER_REVIEW",
+            "domain_draft": draft,
+            "message_to_user": "Review this draft and confirm to save.",
+        }
+
+    run_real_save = os.getenv("RUN_REAL_DOMAINS") == "1"
+    if run_real_save:
+        try:
+            _persist_domain(draft["domain_id"], user_id, draft)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("DOMAIN_WRITE_FAILED", error=str(exc), domain_id=draft["domain_id"])
+            return {
+                "reasoning": "Failed to persist domain to Firestore.",
+                "status": "WRITE_ERROR",
+                "message_to_user": "Could not save the domain. Please retry later.",
+            }
+
+    return {
+        "reasoning": "User confirmed draft; saved." if run_real_save else "User confirmed draft; mock save performed.",
+        "status": "SUCCESS",
+        "domain_draft": draft,
+        "message_to_user": f"Domain {draft['name']} saved.",
+    }
