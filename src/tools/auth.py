@@ -2,6 +2,11 @@ from __future__ import annotations
 
 """
 Auth tool (Firestore-backed): looks up user by username, creates if missing.
+
+Public API:
+- tool_auth_user(payload): validates username, queries Firestore `users`, creates if absent; returns status/data/error per spec.
+
+Usage: requires GOOGLE_APPLICATION_CREDENTIALS/GOOGLE_CLOUD_PROJECT and FIRESTORE_DATABASE. Obeys RUN_REAL modes implicitly (always real Firestore). Errors are returned in response; caller should handle AUTH failures gracefully. See docs/tool_auth_user.json for detailed schema.
 """
 
 from typing import Any, Dict

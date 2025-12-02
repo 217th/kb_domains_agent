@@ -5,6 +5,13 @@ Content tools (real):
 - Ordinary page scraping via requests + BeautifulSoup.
 - PDF download and text extraction via pypdf.
 - YouTube transcript fetch via youtube-transcript-api.
+
+Public API:
+- tool_process_ordinary_page(payload): fetch/clean HTML.
+- tool_process_pdf_link(payload): download PDF, extract text.
+- tool_process_youtube_link(payload): fetch transcript text.
+
+Usage: networked; respects USER_AGENT; raises error statuses on HTTP/timeouts/empty content. No mock flag here—mock at caller/tests via monkeypatch. See docs/tool_process_* JSON specs. Beware site scraping policies and PDF size limits.
 """
 
 import re

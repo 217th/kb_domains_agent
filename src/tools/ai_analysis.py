@@ -4,6 +4,13 @@ from __future__ import annotations
 AI analysis tools:
 - Relevance scoring, fact extraction, and domain prettify.
 - Mock by default; real Gemini calls when RUN_REAL_AI=1 using google-generativeai.
+
+Public API:
+- tool_define_topic_relevance(payload): returns score/reasoning or error.
+- tool_extract_facts_from_text(payload): returns facts list or error; handles missing parts/finish_reason gracefully.
+- tool_prettify_domain_description(payload): returns structured name/description/keywords.
+
+Usage: Requires GOOGLE_API_KEY when RUN_REAL_AI=1; otherwise mocked. Uses model configs from config/config.yaml. Set RUN_REAL_AI=0 to avoid API calls in tests. See docs/tool_* JSON specs. Generation may be limited by safety/max tokens; errors surface in error_detail.
 """
 
 import json

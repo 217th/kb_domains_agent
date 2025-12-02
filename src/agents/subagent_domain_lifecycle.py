@@ -4,6 +4,11 @@ from __future__ import annotations
 Subagent: Domain Lifecycle
 - Drafts domain via prettify tool.
 - Awaits confirmation; on confirm can persist to Firestore when RUN_REAL_DOMAINS=1, else mock save.
+
+Public API:
+- run_subagent_domain_lifecycle(payload): handles CREATE/UPDATE drafts, confirmation flow; returns status/domain_draft/message_to_user.
+
+Usage: Invoked via agent_root or directly. Prettify uses AI (mock or Gemini). Real save requires RUN_REAL_DOMAINS=1 and GCP Firestore setup. See docs/subagent_domain_lifecycle.json for spec. Logs PRETTIFY_FAILED/DOMAIN_WRITE_FAILED on errors.
 """
 
 import os

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 """
-Tracing utilities:
-- Decorator emits SPAN_START/END logs with masked args.
-- Optionally sends spans to Cloud Trace v2 when ENABLE_GCP_LOGGING=1.
+Tracing utilities for span logging and optional Cloud Trace v2 export.
+
+Public API:
+- trace_span(span_name=None, component=None): decorator logging SPAN_START/END with masked args; emits Cloud Trace spans when ENABLE_GCP_LOGGING=1.
+
+Usage: Apply to functions requiring span-level visibility. Needs GOOGLE_CLOUD_PROJECT and creds when exporting traces; set ENABLE_LOGGING_DEBUG=1 to see export errors. See README for observability configuration. Cloud Trace export is best-effort and may be unavailable in restricted networks.
 """
 
 import functools

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 """
-Structured logger:
-- Prints JSON to stdout with labels.
-- Optionally ships to Cloud Logging when ENABLE_GCP_LOGGING=1.
-- Masks sensitive data and filters secrets.
+Structured logging utilities with optional Cloud Logging support.
+
+Public API:
+- StructuredLogger: emits JSON logs with labels and masking.
+- get_logger(component): returns a StructuredLogger for the component.
+- mask_pii(text): truncates long text to reduce PII exposure.
+
+Usage: prints to stdout by default; when ENABLE_GCP_LOGGING=1 (and GCP creds set), also sends to Cloud Logging (`structured`). Respects OBS config (config/observability_config.yaml) and env secrets filtering. Enable ENABLE_LOGGING_DEBUG=1 to surface send errors. See docs/project_overview.md and README for configuration details. Experimental cloud emission may fail silently if networking is blocked.
 """
 
 import json

@@ -4,6 +4,11 @@ from __future__ import annotations
 Agent Root:
 - Authenticates user, routes intents (URL/doc processing, domain lifecycle, toggle/snapshots/export).
 - Emits HANDOFF logs on delegation.
+
+Public API:
+- run_agent_root(user_message, session_user_id=None): returns status/response or delegation payload per spec.
+
+Usage: Uses tool_auth_user and domain tools (Firestore-backed). Delegates to subagent_document_processor or subagent_domain_lifecycle; caller expected to execute subagent when status=DELEGATE. Respects prompts/config loader. See docs/agent_root.json for full spec. HANDOFF logs include reason and target.
 """
 
 import re

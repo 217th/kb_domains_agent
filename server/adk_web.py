@@ -3,6 +3,14 @@ from __future__ import annotations
 """
 FastAPI harness exposing agent_root and subagents for HTTP access.
 Use ./adk web to run; designed primarily for local/mock flows.
+
+Public API:
+- /agent-root (POST): runs agent_root.
+- /subagent-domain-lifecycle (POST): runs domain lifecycle subagent.
+- /subagent-document-processor (POST): runs doc processor subagent.
+- /docs/status (GET): lists endpoints.
+
+Usage: `./adk web` starts uvicorn server. Honors environment flags for AI/memory/domains/logging. Not a full ADK web UI; meant for local API testing. See README and docs/project_overview.md.
 """
 
 from typing import Optional

@@ -4,6 +4,11 @@ from __future__ import annotations
 Memory tool:
 - Mock mode (default) returns fake memory IDs.
 - Real mode (RUN_REAL_MEMORY=1) saves facts into Firestore collection.
+
+Public API:
+- tool_save_fact_to_memory(payload): save fact metadata; returns status/data/error.
+
+Usage: Mock unless RUN_REAL_MEMORY=1. Real path requires GCP creds/project/FIRESTORE_DATABASE; writes to MEMORY_COLLECTION_NAME (default memory_facts). See docs/tool_save_fact_to_memory.json. Not the Vertex AI Memory Bank; uses Firestore as durable store here.
 """
 
 import os

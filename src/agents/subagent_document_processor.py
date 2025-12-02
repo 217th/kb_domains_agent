@@ -4,6 +4,11 @@ from __future__ import annotations
 Subagent: Document Processor
 - Classifies/fetches content by URL, checks relevance per domain, extracts facts, and saves selected facts.
 - Logs hand-offs and key steps; spans instrumented via trace_span.
+
+Public API:
+- run_subagent_document_processor(payload): discovery mode (URL→facts) or save mode (selected_fact_ids).
+
+Usage: Requires user_id and raw_text or selected facts. Content tools are real networked; relevance/facts may hit Gemini when RUN_REAL_AI=1. Saves facts via tool_save_fact_to_memory (mock or Firestore when RUN_REAL_MEMORY=1). See docs/subagent_document_processor.json. Emits logs for classification, domain filtering, fact extraction errors, and save batches.
 """
 
 import re

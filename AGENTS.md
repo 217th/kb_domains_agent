@@ -79,3 +79,15 @@ Use context7 MCP to access up-to-date documentation.
 
 #### 5. Relevance treshold
 The relevance treshold that used in 'subagent_document_processor' should be read from config file. Default is '0.7'.
+
+## Docstrings
+
+Write and keep up-to-date a module-level docstring for each Python file. Include the following:
+- A concise summary of the module’s purpose and context (1–2 sentences: what this module does, in what context it is used).
+- A list of main public objects: key classes, functions, and exceptions with a very brief explanation of each (especially important for library code).
+- Add:
+    - Information about usage examples, environment settings, or global variables.
+    - Links to more detailed documentation or specifications.
+    - Warnings or limitations (such as if an API is experimental).
+
+The docstring should follow PEP 257 style guidelines: use triple double quotes, start with a short summary, and structure any further details in new paragraphs. Use clear, concise language suitable for users of your module.

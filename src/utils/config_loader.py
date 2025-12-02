@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 """
-Config loader responsible for:
-- Validating required env vars via pydantic settings (.env).
-- Loading prompts/config YAML.
-- Exposing helpers for model configs and thresholds.
+Configuration loader for prompts and model settings.
+
+Public API:
+- ConfigLoader: singleton that validates env vars, loads YAML configs.
+- load_prompts(): returns dict of agent prompts.
+- load_model_config(component_id): returns merged default/override model config.
+- load_relevance_threshold(component_id): returns numeric threshold.
+
+Usage: requires .env with GOOGLE_APPLICATION_CREDENTIALS/GOOGLE_CLOUD_PROJECT (and optional FIRESTORE_DATABASE, GOOGLE_API_KEY). Reads config/prompts.yaml and config/config.yaml. See docs/project_overview.md for architecture context. Experimental flags may change structure without notice.
 """
 
 import os

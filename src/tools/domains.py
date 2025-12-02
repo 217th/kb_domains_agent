@@ -5,6 +5,15 @@ Domain tools:
 - Fetch/toggle domains from Firestore.
 - Generate/export snapshots (mocked).
 - Prettify domain description (delegates to AI).
+
+Public API:
+- tool_fetch_user_knowledge_domains(payload): list domains with filters.
+- tool_toggle_domain_status(payload): flip active/inactive for a domain.
+- tool_generate_domain_snapshot(payload): mocked summary.
+- tool_export_detailed_domain_snapshot(payload): mocked export link.
+- tool_prettify_domain_description(payload): delegates to AI prettify.
+
+Usage: Firestore-backed reads/writes; requires GCP creds/project/FIRESTORE_DATABASE. Prettify relies on ai_analysis (Gemini) or mock via RUN_REAL_AI flag. Snapshot/export remain mocked. See docs/tool_* JSON specs and README for flags (`RUN_REAL_DOMAINS` controls save in lifecycle agent, not here).
 """
 
 from typing import Any, Dict, List, Optional
