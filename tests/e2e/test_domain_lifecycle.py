@@ -1,9 +1,11 @@
 import sys
 from pathlib import Path
+import os
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
+os.environ.setdefault("RUN_REAL_DOMAINS", "0")
 
 
 def test_domain_lifecycle_draft_and_confirm():

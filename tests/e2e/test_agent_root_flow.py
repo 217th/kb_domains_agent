@@ -22,10 +22,14 @@ def test_agent_root_auth_flow(monkeypatch):
             ],
         }
 
+    def fake_name(payload):
+        return {"status": "success", "name": "Alice", "confidence": "high", "detected": True, "error_detail": None}
+
     monkeypatch.setattr(agents.agent_root, "tool_auth_user", fake_auth)
     monkeypatch.setattr(agents.agent_root, "tool_fetch_user_knowledge_domains", fake_fetch)
+    monkeypatch.setattr(agents.agent_root, "tool_extract_user_name", fake_name)
 
-    result = run_agent_root("My name is Alice")
+    result = run_agent_root("Alice", name_attempts=1)
     assert result["status"] == "SUCCESS"
     assert "domains" in result["response_message"]
     assert result.get("authenticated_user_id") == "user_mock"

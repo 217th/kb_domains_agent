@@ -9,6 +9,7 @@ Public API:
 - tool_define_topic_relevance(payload): returns score/reasoning or error.
 - tool_extract_facts_from_text(payload): returns facts list or error; handles missing parts/finish_reason gracefully.
 - tool_prettify_domain_description(payload): returns structured name/description/keywords.
+- tool_extract_user_name(payload): extracts a user name from free-form input using Gemini or mock.
 
 Usage: Requires GOOGLE_API_KEY when RUN_REAL_AI=1; otherwise mocked. Uses model configs from config/config.yaml. Set RUN_REAL_AI=0 to avoid API calls in tests. See docs/tool_* JSON specs. Generation may be limited by safety/max tokens; errors surface in error_detail.
 """
@@ -20,7 +21,12 @@ from typing import Any, Dict, List
 import google.generativeai as genai
 from pydantic import BaseModel, Field
 
-from src.utils.config_loader import ConfigLoader, load_model_config, load_relevance_threshold
+from src.utils.config_loader import (
+    ConfigLoader,
+    load_model_config,
+    load_prompts,
+    load_relevance_threshold,
+)
 
 
 class RelevanceRequest(BaseModel):
@@ -72,6 +78,18 @@ class PrettifyResponse(BaseModel):
     status: str
     data: PrettifyData
     error_details: str | None = None
+
+
+class NameExtractRequest(BaseModel):
+    user_input: str
+
+
+class NameExtractResponse(BaseModel):
+    name: str | None
+    confidence: str | None
+    detected: bool
+    status: str
+    error_detail: str | None = None
 
 
 def _ensure(model_cls, payload):
@@ -238,3 +256,59 @@ Raw input:
         return PrettifyResponse(status="SUCCESS", data=data, error_details=None).model_dump()
     except Exception as exc:  # noqa: BLE001
         return {"status": "error", "error_details": f"LLM_SERVICE_UNAVAILABLE: {exc}"}
+
+
+def tool_extract_user_name(payload: NameExtractRequest | Dict[str, Any]) -> Dict[str, Any]:
+    req = _ensure(NameExtractRequest, payload)
+    prompts = load_prompts()
+    prompt_template = prompts.get("name_extraction_prompt", "")
+    if os.getenv("RUN_REAL_AI") != "1":
+        # Simple heuristic mock
+        lower = req.user_input.lower()
+        name = None
+        for marker in ["меня зовут", "я ", "i am", "i'm", "my name is", "me llamo", "je m'appelle"]:
+            if marker in lower:
+                parts = req.user_input.split()
+                if len(parts) >= 1:
+                    name = parts[-1].strip(".!,")
+                    break
+        detected = bool(name)
+        return NameExtractResponse(
+            name=name,
+            confidence="low" if detected else None,
+            detected=detected,
+            status="success",
+            error_detail=None,
+        ).model_dump()
+
+    try:
+        model = _configure_model("agent_root")
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error_detail": f"LLM_AUTH_ERROR: {exc}", "detected": False, "name": None, "confidence": None}
+
+    prompt = prompt_template.format(user_input=req.user_input)
+    try:
+        resp = model.generate_content(prompt)
+        text, finish_reason = _extract_text_safely(resp)
+        if not text:
+            return {
+                "status": "error",
+                "error_detail": f"NAME_NOT_DETECTED: finish_reason={finish_reason}",
+                "name": None,
+                "confidence": None,
+                "detected": False,
+            }
+        parsed = _safe_json_extract(text or "")
+        if not parsed or not isinstance(parsed, dict):
+            return {"status": "error", "error_detail": "NAME_NOT_DETECTED", "name": None, "confidence": None, "detected": False}
+        name = parsed.get("name")
+        detected = bool(parsed.get("detected")) and bool(name)
+        return NameExtractResponse(
+            name=name,
+            confidence=parsed.get("confidence"),
+            detected=detected,
+            status="success" if detected else "error",
+            error_detail=None if detected else "NAME_NOT_DETECTED",
+        ).model_dump()
+    except Exception as exc:  # noqa: BLE001
+        return {"status": "error", "error_detail": f"LLM_SERVICE_UNAVAILABLE: {exc}", "name": None, "confidence": None, "detected": False}

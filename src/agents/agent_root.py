@@ -15,6 +15,7 @@ import re
 from typing import Any, Dict, Optional
 
 from src.tools.auth import tool_auth_user
+from src.tools.ai_analysis import tool_extract_user_name
 from src.tools.domains import (
     tool_export_detailed_domain_snapshot,
     tool_fetch_user_knowledge_domains,
@@ -64,26 +65,53 @@ def _classify_intent(message: str) -> str:
 
 
 @trace_span(span_name="agent_root_turn", component="agent_root")
-def run_agent_root(user_message: str, session_user_id: Optional[str] = None) -> Dict[str, Any]:
+def run_agent_root(user_message: str, session_user_id: Optional[str] = None, name_attempts: int = 0) -> Dict[str, Any]:
     prompts = load_prompts()
     _ = prompts.get("agent_root")  # Loaded to satisfy prompt management requirement.
     _ = load_model_config("agent_root")
 
     # Phase 1: authentication/state check
     if not session_user_id:
-        name = _detect_name(user_message)
-        if not name:
+        # Initial prompt if no input yet
+        if not user_message.strip() and name_attempts == 0:
             return {
                 "reasoning": "User not authenticated; request introduction.",
                 "status": "AUTH_REQUIRED",
-                "response_message": "Hello! Please tell me your name to get started.",
+                "response_message": prompts.get("agent_root_name_prompt", "Hello! Please tell me your name to get started."),
+                "name_attempts": name_attempts,
             }
+
+        attempts = name_attempts + 1
+        name_res = tool_extract_user_name({"user_input": user_message})
+        logger.info(
+            "NAME_EXTRACTION_RESULT",
+            detected=name_res.get("detected"),
+            name=name_res.get("name"),
+            confidence=name_res.get("confidence"),
+        )
+        if not name_res.get("detected") or not name_res.get("name"):
+            if attempts >= 3:
+                return {
+                    "reasoning": "Name not detected after max attempts.",
+                    "status": "AUTH_REQUIRED",
+                    "response_message": "Access denied. Please request a new session.",
+                    "name_attempts": attempts,
+                }
+            return {
+                "reasoning": "Name not detected; ask user to retry.",
+                "status": "AUTH_REQUIRED",
+                "response_message": "I could not catch your name. Please enter it again.",
+                "name_attempts": attempts,
+            }
+
+        name = name_res["name"]
         auth_result = tool_auth_user({"username": name})
         if auth_result.get("status") != "success" or "data" not in auth_result:
             return {
                 "reasoning": f"Authentication tool failed: {auth_result}",
                 "status": "AUTH_REQUIRED",
                 "response_message": "I could not verify you. Please try again or check credentials.",
+                "name_attempts": attempts,
             }
         user_id = auth_result["data"]["user_id"]
         domains_result = tool_fetch_user_knowledge_domains(
@@ -95,6 +123,7 @@ def run_agent_root(user_message: str, session_user_id: Optional[str] = None) -> 
             "status": "SUCCESS",
             "response_message": f"Welcome, {name}! Here are your domains: {domain_summary}",
             "authenticated_user_id": user_id,
+            "name_attempts": attempts,
         }
 
     # Phase 2: intent classification & routing

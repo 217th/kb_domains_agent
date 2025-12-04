@@ -23,6 +23,11 @@ from src.agents.subagent_domain_lifecycle import run_subagent_domain_lifecycle
 def main() -> None:
     session_user_id: Optional[str] = None
     pending_domain_state: Optional[dict] = None
+    name_attempts = 0
+    # Agent initiates greeting
+    initial = run_agent_root("", session_user_id=session_user_id, name_attempts=name_attempts)
+    if initial.get("response_message"):
+        print(f"[root] {json.dumps(initial, ensure_ascii=False)}")
     print("CLI chat. Type 'exit' to quit.")
     while True:
         try:
@@ -50,10 +55,13 @@ def main() -> None:
                 print("[info] Domain saved; continuing.")
             continue
 
-        root_res = run_agent_root(user_input, session_user_id=session_user_id)
+        if session_user_id is None:
+            name_attempts += 1
+        root_res = run_agent_root(user_input, session_user_id=session_user_id, name_attempts=name_attempts)
         print(f"[root] {json.dumps(root_res, ensure_ascii=False)}")
         if root_res.get("authenticated_user_id"):
             session_user_id = root_res["authenticated_user_id"]
+            name_attempts = 0
         if root_res.get("status") == "DELEGATE":
             target = root_res.get("delegation_target")
             payload = root_res.get("delegation_payload", {})

@@ -207,6 +207,7 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 codex*
+shotgun*
 
 # Marimo
 marimo/_static/
