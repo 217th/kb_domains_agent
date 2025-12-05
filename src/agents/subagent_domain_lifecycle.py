@@ -47,6 +47,7 @@ def _persist_domain(doc_id: str, user_id: str, draft: Dict[str, Any]) -> None:
 
 @trace_span(span_name="subagent_domain_lifecycle_turn", component="subagent_domain_lifecycle")
 def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
+    # Load prompts/model config to keep invocation parameters consistent with the spec.
     _ = load_prompts().get("subagent_domain_lifecycle")
     _ = load_model_config("subagent_domain_lifecycle")
 
@@ -56,6 +57,7 @@ def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
     confirmation_status = bool(payload.get("confirmation_status", False))
     domain_id = payload.get("domain_id")
 
+    # Validate required fields early; avoid LLM calls when request is malformed.
     if not operation_type or not user_id or not user_input:
         return {
             "reasoning": "Missing required fields.",
@@ -63,6 +65,8 @@ def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message_to_user": "operation_type, user_id, and user_input are required.",
         }
 
+    # First phase: ask LLM to prettify the raw intent into a structured draft.
+    # This is the draft-generation hop: user text -> LLM prettify -> candidate domain_draft.
     prettified = tool_prettify_domain_description({"raw_input_text": user_input})
     if prettified.get("status") != "SUCCESS":
         logger.error(
@@ -76,6 +80,7 @@ def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message_to_user": "Could not draft domain. Please retry.",
         }
 
+    # Build draft object; reused across both review and save paths.
     draft = {
         "domain_id": domain_id or _generate_id(),
         "name": prettified["data"]["name"],
@@ -83,6 +88,10 @@ def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
         "keywords": prettified["data"]["keywords"],
     }
 
+    # If user has not confirmed yet, surface the draft for review and stop.
+    # Control waits for explicit user confirmation; no persistence occurs in this branch.
+    # Confirmation is driven by the caller (agent_root or CLI) setting confirmation_status=True
+    # after the user replies with “confirm” (or equivalent) to the presented draft.
     if not confirmation_status:
         return {
             "reasoning": "Draft prepared; awaiting user confirmation.",
@@ -91,6 +100,7 @@ def run_subagent_domain_lifecycle(payload: Dict[str, Any]) -> Dict[str, Any]:
             "message_to_user": "Review this draft and confirm to save.",
         }
 
+    # Confirmation path: user approved the draft; now decide between real vs. mock save.
     run_real_save = os.getenv("RUN_REAL_DOMAINS") == "1"
     if run_real_save:
         try:

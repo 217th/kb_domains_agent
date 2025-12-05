@@ -194,5 +194,16 @@ def run_agent_root(user_message: str, session_user_id: Optional[str] = None, nam
     return {
         "reasoning": "No matching intent; requesting clarification.",
         "status": "SUCCESS",
-        "response_message": "How can I help with your domains or links?",
+        "response_message": 
+            """How can I help with your domains or links? Type:
+            - create domain (describe)
+            - or new topic (describe)
+            - or edit domain
+            - or update domain
+            - or enable domain
+            - or disable domain
+            - or snapshot
+            - or summary
+            - or export
+            - or provide valid url""",
     }

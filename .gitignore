@@ -157,7 +157,6 @@ kb-agent-*.json
 
 # mkdocs documentation
 /site
-/docs
 /docs/- old
 
 # mypy
