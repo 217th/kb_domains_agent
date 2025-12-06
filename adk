@@ -7,8 +7,9 @@ shift || true
 
 case "$CMD" in
   web)
-    # Simple wrapper to run the FastAPI harness
-    exec .venv/bin/uvicorn server.adk_web:app --reload --host 0.0.0.0 --port 8000 "$@"
+    # Use official ADK web entrypoint; AGENTS_DIR should be the parent folder that contains agent folders.
+    AGENTS_DIR="${ADK_AGENTS_DIR:-.}"
+    exec .venv/bin/adk web "$AGENTS_DIR" "$@"
     ;;
   webui)
     # Launch official ADK Web UI (requires npm and network to fetch adk-web package)
@@ -18,7 +19,8 @@ case "$CMD" in
     exec npx -y "$ADK_WEB_PKG" serve --api "$API_URL" "$@"
     ;;
   chat)
-    exec .venv/bin/python -m src.cli.chat "$@"
+    # Interactive CLI powered by ADK Runner
+    exec .venv/bin/adk run kb_adk "$@"
     ;;
   *)
     echo "Usage: ./adk web [uvicorn args] | ./adk webui [--api http://...] (requires npm) | ./adk chat" >&2

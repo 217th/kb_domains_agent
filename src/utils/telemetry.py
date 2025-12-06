@@ -43,7 +43,11 @@ def trace_span(span_name: Optional[str] = None, component: Optional[str] = None)
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             logger = get_logger(component or func.__module__)
-            trace_id = uuid.uuid4().hex
+            session_id = kwargs.get("session_id")
+            base_trace = uuid.uuid4().hex
+            session_fragment = "".join(ch for ch in (session_id or "") if ch.isalnum())
+            gcp_trace_id = (session_fragment + base_trace)[:32].ljust(32, "0")
+            trace_id = f"{session_id}-{base_trace}" if session_id else base_trace
             masked_args = [mask_pii(str(arg)) for arg in args]
             masked_kwargs: Dict[str, Any] = {k: mask_pii(str(v)) if isinstance(v, str) else v for k, v in kwargs.items()}
             span_label = span_name or func.__name__
@@ -51,20 +55,21 @@ def trace_span(span_name: Optional[str] = None, component: Optional[str] = None)
             span_context = None
             if ENABLE_GCP_LOGGING and trace_client and trace_module:
                 try:
-                    project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
-                    if project_id:
-                        span_id = uuid.uuid4().hex[:16]
-                        span_name_full = f"projects/{project_id}/traces/{trace_id}/spans/{span_id}"
-                        span_context = {
-                            "name": span_name_full,
-                            "span_id": span_id,
-                        }
+                        project_id = os.getenv("GOOGLE_CLOUD_PROJECT")
+                        if project_id:
+                            span_id = uuid.uuid4().hex[:16]
+                            span_name_full = f"projects/{project_id}/traces/{gcp_trace_id}/spans/{span_id}"
+                            span_context = {
+                                "name": span_name_full,
+                                "span_id": span_id,
+                            }
                 except Exception:
                     span_context = None
 
             logger.info(
                 "SPAN_START",
                 trace_id=trace_id,
+                session_id=session_id,
                 span_name=span_label,
                 function_name=func.__name__,
                 args=masked_args,
@@ -95,6 +100,7 @@ def trace_span(span_name: Optional[str] = None, component: Optional[str] = None)
             logger.info(
                 "SPAN_END",
                 trace_id=trace_id,
+                session_id=session_id,
                 span_name=span_label,
                 function_name=func.__name__,
             )

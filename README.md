@@ -114,6 +114,12 @@ Set in `.env` (see `.env.example`):
 - Traces: Cloud Trace v2; use Trace Explorer. Set `ENABLE_LOGGING_DEBUG=1` to see send errors locally.
 - Hand-off events are logged (`HANDOFF`, `DOC_CLASSIFIED`, `FACT_SAVE_BATCH`, etc.) and spans wrap agent/subagent turns.
 
+## Sessions (ADK)
+- Uses ADK `InMemorySessionService` (dev/prod). Sessions are ephemeral and cleared on process restart.
+- `session_id` is generated server-side on the first turn and returned in responses; clients must reuse it across turns (CLI keeps it automatically).
+- Session state holds `user_id`, `user_name`, `name_attempts`, and intent context (`intent`, `domain_id`, `url`); sub-agents read/write this instead of payload fields.
+- Trace/log entries include `session_id` and trace IDs prefixed with the session to group telemetry per conversation.
+
 ## Running Modes
 - Mock (default): `RUN_REAL_AI=0`, `RUN_REAL_MEMORY=0`, `RUN_REAL_DOMAINS=0`.
 - Real AI: set `RUN_REAL_AI=1` (+ `GOOGLE_API_KEY`).
@@ -121,10 +127,29 @@ Set in `.env` (see `.env.example`):
 - Real domains: set `RUN_REAL_DOMAINS=1` (domains collection in Firestore).
 - GCP telemetry: set `ENABLE_GCP_LOGGING=1` (optional `ENABLE_LOGGING_DEBUG=1`).
 
-## Running
-- CLI chat: `./adk chat`
+## Running (ADK)
+- CLI chat: `./adk chat` (alias for `adk run kb_adk`)
   - Domain lifecycle is multi-turn: first reply shows draft; type `confirm` to save (mock or Firestore if `RUN_REAL_DOMAINS=1`).
-- API harness: `./adk web` → use the JSON endpoints; status, hand-off, and spans are logged.
+- Web UI: `./adk web` (ADK web discovers `kb_adk` in repo root; open http://127.0.0.1:8000/dev-ui/)
+
+### Telemetry
+- To send traces/logs to GCP: set `ENABLE_GCP_LOGGING=1` and provide `GOOGLE_CLOUD_PROJECT`/credentials. Session ID is attached to spans (`session.id`).
+
+### Run profiles
+- `ADK_RUN_PROFILE=dev` (default): `RUN_REAL_AI=0`, `RUN_REAL_MEMORY=0`, max_llm_calls=100
+- `ADK_RUN_PROFILE=prod`: `RUN_REAL_AI=1`, `RUN_REAL_MEMORY=1`, max_llm_calls=200
+
+Env flags consumed by RunConfig/custom metadata: `RUN_REAL_AI`, `RUN_REAL_MEMORY`, `ENABLE_GCP_LOGGING`.
+
+### Real Firestore / Gemini
+- Export creds and project before running real tests or prod profile:
+  ```bash
+  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/sa.json
+  export GOOGLE_CLOUD_PROJECT=kb-agent-479608
+  export FIRESTORE_DATABASE=kb-agent   # or kb-agent-test1
+  ```
+- Run real Firestore integration: `FIRESTORE_DATABASE=kb-agent .venv/bin/python -m pytest tests/integration/test_firestore_real.py -vv`
+- Toggle real LLM: set `RUN_REAL_AI=1` (requires Google API key/Vertex auth); mocks stay when `RUN_REAL_AI=0`.
 
 ## Tests
 - Offline/unit/e2e: `.venv/bin/python -m pytest tests/unit tests/e2e`

@@ -15,7 +15,7 @@ Usage: `./adk web` starts uvicorn server. Honors environment flags for AI/memory
 
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.agents.agent_root import run_agent_root
@@ -27,22 +27,22 @@ app = FastAPI(title="ADK Mock Harness", version="0.1.0")
 
 class AgentRootRequest(BaseModel):
     user_message: str
-    session_user_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class DomainLifecycleRequest(BaseModel):
     operation_type: str
-    user_id: str
     user_input: str
     confirmation_status: bool = False
     domain_id: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class DocumentProcessorRequest(BaseModel):
-    user_id: str
     raw_text: Optional[str] = None
     selected_fact_ids: Optional[list[str]] = None
     facts_payload: Optional[list[dict]] = None
+    session_id: Optional[str] = None
 
 
 @app.get("/")
@@ -55,17 +55,17 @@ def read_root():
 
 @app.post("/agent-root")
 def agent_root(req: AgentRootRequest):
-    return run_agent_root(req.user_message, session_user_id=req.session_user_id)
+    raise HTTPException(status_code=410, detail="Legacy API deprecated; use ADK web UI (/dev-ui/) with kb_adk agent.")
 
 
 @app.post("/subagent-domain-lifecycle")
 def subagent_domain_lifecycle(req: DomainLifecycleRequest):
-    return run_subagent_domain_lifecycle(req.model_dump())
+    raise HTTPException(status_code=410, detail="Legacy API deprecated; use ADK web UI.")
 
 
 @app.post("/subagent-document-processor")
 def subagent_document_processor(req: DocumentProcessorRequest):
-    return run_subagent_document_processor(req.model_dump())
+    raise HTTPException(status_code=410, detail="Legacy API deprecated; use ADK web UI.")
 
 
 @app.get("/docs/status")

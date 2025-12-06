@@ -1,11 +1,14 @@
 import sys
 from pathlib import Path
+import os
 
 import pytest
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT_DIR))
+os.environ["ENABLE_GCP_LOGGING"] = "0"
+os.environ.setdefault("RUN_REAL_AI", "0")
 
 
 def test_document_processor_discovery_flow(monkeypatch):
@@ -48,8 +51,12 @@ def test_document_processor_discovery_flow(monkeypatch):
     monkeypatch.setattr(subagent_document_processor, "tool_process_youtube_link", fake_process_page)
     monkeypatch.setattr(subagent_document_processor, "tool_process_ordinary_page", fake_process_page)
 
+    session_id = "sess_e2e_doc_discovery"
+    state = {"user_id": "user_1", "url": "http://example.com/article"}
     result = subagent_document_processor.run_subagent_document_processor(
-        {"user_id": "user_1", "raw_text": "Here is a link http://example.com/article"}
+        {"session_id": session_id, "raw_text": "Here is a link http://example.com/article"},
+        session_id=session_id,
+        session_state=state,
     )
     assert result["status"] == "review_required"
     facts = result["candidate_facts"]
@@ -72,8 +79,12 @@ def test_document_processor_save_flow(monkeypatch):
         {"domain_id": "dom_ai", "fact_id": "f1", "content": "c1", "source_url": "http://x"},
         {"domain_id": "dom_ai", "fact_id": "f2", "content": "c2", "source_url": "http://x"},
     ]
+    session_id = "sess_e2e_doc_save"
+    state = {"user_id": "user_1"}
     result = subagent_document_processor.run_subagent_document_processor(
-        {"user_id": "user_1", "selected_fact_ids": ["f1", "f2"], "facts_payload": facts_payload}
+        {"session_id": session_id, "selected_fact_ids": ["f1", "f2"], "facts_payload": facts_payload},
+        session_id=session_id,
+        session_state=state,
     )
     assert result["status"] == "success"
     assert result["saved_count"] == 2

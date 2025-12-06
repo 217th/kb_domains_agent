@@ -62,18 +62,26 @@ def _generate_fact_id(domain_id: str, index: int) -> str:
 
 
 @trace_span(span_name="subagent_document_processor_turn", component="subagent_document_processor")
-def run_subagent_document_processor(payload: Dict[str, Any]) -> Dict[str, Any]:
+def run_subagent_document_processor(
+    payload: Dict[str, Any], session_id: str | None = None, session_state: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     _ = load_prompts().get("subagent_document_processor")
     _ = load_model_config("subagent_document_processor")
     threshold = load_relevance_threshold("subagent_document_processor")
 
-    user_id = payload.get("user_id")
+    if session_state is None:
+        raise ValueError("session_state is required (legacy session_manager removed)")
+    using_adk_state = True
+    state = dict(session_state)
+    session_id = session_id or payload.get("session_id")
+    original_state = dict(state)
+    user_id = state.get("user_id")
     raw_text = payload.get("raw_text")
     selected_fact_ids = payload.get("selected_fact_ids") or []
     facts_payload = payload.get("facts_payload") or []
 
     if not user_id:
-        return {"reasoning": "Missing user_id.", "status": "error", "error_detail": "user_id_required"}
+        return _finalize({"reasoning": "Missing user_id.", "status": "error", "error_detail": "user_id_required", "session_id": session_id}, state, original_state, session_id, session_state, using_adk_state)
 
     # Save mode
     if selected_fact_ids and facts_payload:
@@ -94,35 +102,77 @@ def run_subagent_document_processor(payload: Dict[str, Any]) -> Dict[str, Any]:
             selected=len(selected_fact_ids),
             attempted=len(facts_payload),
             saved=saved,
+            session_id=session_id,
         )
-        return {
-            "reasoning": f"Saved {saved} facts.",
-            "status": "success",
-            "saved_count": saved,
-        }
+        return _finalize(
+            {
+                "reasoning": f"Saved {saved} facts.",
+                "status": "success",
+                "saved_count": saved,
+                "session_id": session_id,
+            },
+            state,
+            original_state,
+            session_id,
+            session_state,
+            using_adk_state,
+        )
 
     # Discovery mode
-    if not raw_text:
-        return {"reasoning": "No raw_text provided for discovery.", "status": "error", "error_detail": "raw_text_missing"}
-
-    target_url = _first_url(raw_text)
+    target_url = state.get("url") or _first_url(raw_text or "")
     if not target_url:
-        return {"reasoning": "No URL found in text.", "status": "error", "error_detail": "url_missing"}
+        return _finalize(
+            {
+                "reasoning": "No URL found in text.",
+                "status": "error",
+                "error_detail": "url_missing",
+                "session_id": session_id,
+            },
+            state,
+            original_state,
+            session_id,
+            session_state,
+            using_adk_state,
+        )
 
     category = _classify_url(target_url)
-    logger.info("DOC_CLASSIFIED", url=target_url, category=category)
+    state["url_type"] = category
+    logger.info("DOC_CLASSIFIED", url=target_url, category=category, session_id=session_id)
     content_text = _fetch_content(target_url, category)
     if not content_text:
-        logger.error("CONTENT_FETCH_FAILED", url=target_url, category=category)
-        return {"reasoning": "Content fetch failed.", "status": "error", "error_detail": "content_unavailable"}
+        logger.error("CONTENT_FETCH_FAILED", url=target_url, category=category, session_id=session_id)
+        state.pop("url", None)
+        state.pop("url_type", None)
+        return _finalize(
+            {
+                "reasoning": "Content fetch failed.",
+                "status": "error",
+                "error_detail": "content_unavailable",
+                "session_id": session_id,
+            },
+            state,
+            original_state,
+            session_id,
+            session_state,
+            using_adk_state,
+        )
 
     domains_result = tool_fetch_user_knowledge_domains(
         {"user_id": user_id, "status_filter": "ACTIVE", "view_mode": "DETAILED"}
     )
     if domains_result.get("status") == "empty" or not domains_result.get("data"):
-        logger.info("NO_ACTIVE_DOMAINS", user_id=user_id)
-        return {"reasoning": "No active domains found.", "status": "no_relevance"}
-    logger.info("DOMAINS_RETRIEVED", count=len(domains_result.get("data", [])), user_id=user_id)
+        logger.info("NO_ACTIVE_DOMAINS", user_id=user_id, session_id=session_id)
+        state.pop("url", None)
+        state.pop("url_type", None)
+        return _finalize(
+            {"reasoning": "No active domains found.", "status": "no_relevance", "session_id": session_id},
+            state,
+            original_state,
+            session_id,
+            session_state,
+            using_adk_state,
+        )
+    logger.info("DOMAINS_RETRIEVED", count=len(domains_result.get("data", [])), user_id=user_id, session_id=session_id)
 
     candidate_facts: List[Dict[str, Any]] = []
     for domain in domains_result["data"]:
@@ -141,6 +191,7 @@ def run_subagent_document_processor(payload: Dict[str, Any]) -> Dict[str, Any]:
                 domain_name=domain.get("name"),
                 score=relevance.get("relevance_score"),
                 threshold=threshold,
+                session_id=session_id,
             )
             continue
 
@@ -159,6 +210,7 @@ def run_subagent_document_processor(payload: Dict[str, Any]) -> Dict[str, Any]:
                 domain_id=domain.get("domain_id"),
                 domain_name=domain.get("name"),
                 error_detail=facts_resp.get("error_detail"),
+                session_id=session_id,
             )
             continue
         for idx, fact in enumerate(facts_resp.get("facts", [])):
@@ -173,12 +225,51 @@ def run_subagent_document_processor(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     if not candidate_facts:
-        logger.info("NO_RELEVANT_FACTS", url=target_url)
-        return {"reasoning": "No relevant facts above threshold.", "status": "no_relevance"}
+        logger.info("NO_RELEVANT_FACTS", url=target_url, session_id=session_id)
+        state.pop("url", None)
+        state.pop("url_type", None)
+        return _finalize(
+            {"reasoning": "No relevant facts above threshold.", "status": "no_relevance", "session_id": session_id},
+            state,
+            original_state,
+            session_id,
+            session_state,
+            using_adk_state,
+        )
 
-    logger.info("FACTS_EXTRACTED", count=len(candidate_facts), url=target_url)
-    return {
+    logger.info("FACTS_EXTRACTED", count=len(candidate_facts), url=target_url, session_id=session_id)
+    state.pop("url", None)
+    state.pop("url_type", None)
+    return _finalize(
+        {
         "reasoning": f"Extracted {len(candidate_facts)} candidate facts.",
         "status": "review_required",
         "candidate_facts": candidate_facts,
-    }
+        "session_id": session_id,
+        },
+        state,
+        original_state,
+        session_id,
+        session_state,
+        using_adk_state,
+    )
+
+
+def _finalize(
+    resp: Dict[str, Any],
+    state: Dict[str, Any],
+    original_state: Dict[str, Any],
+    session_id: str | None,
+    session_state: Optional[Dict[str, Any]],
+    using_adk_state: bool,
+) -> Dict[str, Any]:
+    delta: Dict[str, Any] = {}
+    for key in set(original_state.keys()).union(state.keys()):
+        if original_state.get(key) != state.get(key):
+            delta[key] = state.get(key)
+
+    if delta:
+        resp["state_delta"] = delta
+
+    resp.setdefault("session_id", session_id)
+    return resp
